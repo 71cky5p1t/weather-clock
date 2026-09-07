@@ -1,0 +1,48 @@
+services:
+  tsv-radar:
+    image: tsv-radar-server
+    build: .
+    container_name: tsv-radar
+    ports:
+      - "8787:8787"
+    environment:
+      - PORT=8787
+      - NUM_FRAMES=12
+      - REFRESH_SECONDS=300
+      - MANIFEST_PATH=/mnt/data/manifest.json
+      - CONTENT_DIR=/mnt/data/content
+      - FIRMWARE_DIR=/mnt/data/firmware
+      - DISPLAY_TZ=Australia/Brisbane
+      - LOCATION_NAME=${LOCATION_NAME:-TOWNSVILLE}
+      - LAT=${LAT:--19.26}
+      - LON=${LON:-146.82}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-}
+    volumes:
+      - ./manifest.json:/mnt/data/manifest.json
+      - ./content:/mnt/data/content
+      - ./firmware:/mnt/data/firmware
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tsv-radar.rule=Host(`${TSV_RADAR_HOST}`)
+      - traefik.http.routers.tsv-radar.entrypoints=websecure
+      - traefik.http.routers.tsv-radar.tls=true
+      - traefik.http.routers.tsv-radar.tls.options=securetls@file
+      - traefik.http.services.tsv-radar.loadbalancer.server.port=8787
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik_proxy}
+    networks:
+      - default
+      - saltbox_proxy
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    restart: unless-stopped
+    networks:
+      - saltbox_proxy
+
+networks:
+  saltbox_proxy:
+    external: true
+    name: ${TRAEFIK_DOCKER_NETWORK:-traefik_proxy}

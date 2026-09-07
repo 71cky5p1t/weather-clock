@@ -1,0 +1,6 @@
+.DS_Store
+**/secrets.h
+tsv-radar/node_modules/
+tsv-radar/.debug/
+tsv-radar/.env
+build/

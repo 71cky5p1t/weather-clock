@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Clock</title>
+<style>
+  :root {
+    --bg: #0d0f14; --panel: #161a23; --line: #262c3a; --text: #e6e8ee; --muted: #8b93a7;
+    --red: #e3000f; --blue: #2f7bff; --yellow: #ffdd00; --green: #2ecc71; --orange: #ff7800;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: .3px; }
+  header .spacer { flex: 1; }
+  header select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  main { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .right { margin-left: auto; font-weight: normal; text-transform: none; letter-spacing: 0; }
+  .wide { grid-column: 1 / -1; }
+  .pix { image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 4px; background: #000; border: 1px solid var(--line); }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+  .stat { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .stat dt { color: var(--muted); }
+  .stat dd { margin: 0; }
+  .ok { color: var(--green); } .bad { color: var(--red); } .warn { color: var(--orange); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+  .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  button, input, textarea { font: inherit; }
+  button { background: #222838; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover { border-color: #3b4458; }
+  button.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  button.small { padding: 3px 8px; font-size: 12px; }
+  input[type=text], input[type=number], textarea { background: #0c0e13; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; width: 100%; }
+  textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; min-height: 260px; resize: vertical; }
+  .form { display: grid; gap: 8px; }
+  .form .inline { display: grid; grid-template-columns: 1fr 110px auto; gap: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  .tablewrap { overflow-x: auto; }
+  .playlist { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12px; background: #0c0e13; }
+  .chip b { color: var(--yellow); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .msg { font-size: 12px; min-height: 1.4em; }
+  .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #222838; border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  code { background: #0c0e13; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Weather Clock</h1>
+  <span class="muted" id="hdr-sub">loading…</span>
+  <div class="spacer"></div>
+  <label class="muted" for="device">Device</label>
+  <select id="device"><option value="default">default</option></select>
+  <button id="refresh" class="small">Refresh</button>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Radar <span class="right" id="radar-sub"></span></h2>
+    <div class="row">
+      <canvas id="radar" width="256" height="256" class="pix"></canvas>
+      <dl class="stat" id="radar-stats"></dl>
+    </div>
+    <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/refresh-radar">Fetch now</button></p>
+  </section>
+
+  <section class="card">
+    <h2>Weather <span class="right" id="weather-sub"></span></h2>
+    <div class="row">
+      <img id="wx0" class="pix" width="192" height="192" alt="current">
+      <img id="wx1" class="pix" width="192" height="192" alt="forecast">
+    </div>
+    <dl class="stat" id="weather-stats" style="margin-top:10px"></dl>
+    <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/refresh-weather">Fetch now</button></p>
+  </section>
+
+  <section class="card">
+    <h2>Send a message</h2>
+    <form id="msgform" class="form">
+      <input type="text" id="msg-text" placeholder="Text to show on the display" maxlength="200" required>
+      <div class="inline">
+        <input type="text" id="msg-from" placeholder="From (optional)" maxlength="40">
+        <input type="number" id="msg-min" value="10" min="1" max="1440" title="minutes">
+        <button class="primary" type="submit">Send</button>
+      </div>
+    </form>
+    <div class="row" style="margin-top:12px; align-items:center">
+      <img id="msg-preview" class="pix" width="128" height="128" alt="" hidden>
+      <div>
+        <div id="msg-status" class="msg muted">No active message.</div>
+        <button id="msg-clear" class="small" hidden>Clear message</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Quote <span class="right muted" id="quote-sub"></span></h2>
+    <div class="row">
+      <img id="quote" class="pix" width="128" height="128" alt="quote">
+      <div class="muted" style="max-width:220px">Quotes rotate on a timer. Edit the list under <code>defaults.quotes</code> in the playlist config.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Playlist <span class="right muted" id="manifest-rev"></span></h2>
+    <div class="playlist" id="playlist"></div>
+    <div id="skipped" class="msg warn" style="margin-top:8px"></div>
+    <dl class="stat" id="defaults" style="margin-top:10px"></dl>
+  </section>
+
+  <section class="card">
+    <h2>Devices</h2>
+    <div class="tablewrap">
+      <table id="devices">
+        <thead><tr><th></th><th>ID</th><th>Page</th><th>FW</th><th>Board</th><th>RSSI</th><th>Heap</th><th>Uptime</th><th>IP</th><th>Seen</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="muted msg" id="devices-empty" style="margin-top:6px"></div>
+  </section>
+
+  <section class="card">
+    <h2>Content assets <span class="right muted" id="content-dir"></span></h2>
+    <div class="row" id="content"></div>
+    <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/reload-content">Rescan folder</button></p>
+  </section>
+
+  <section class="card wide">
+    <h2>Playlist config <span class="right muted" id="manifest-path"></span></h2>
+    <textarea id="config" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:8px; align-items:center">
+      <button class="primary" id="config-save">Save</button>
+      <button id="config-reload">Reload</button>
+      <span class="msg" id="config-msg"></span>
+    </div>
+    <p class="muted" style="margin:10px 0 0">
+      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (durationMs) ·
+      <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
+      Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
+    </p>
+  </section>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let status = null;
+let radarTimer = null;
+let radarImgs = [];
+let adminToken = localStorage.getItem("adminToken") || "";
+
+function deviceId() { return $("#device").value || "default"; }
+function toast(t, bad) { const el = $("#toast"); el.textContent = t; el.style.borderColor = bad ? "var(--red)" : "var(--line)"; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 2500); }
+function ago(ms) { if (!ms) return "never"; const s = Math.round((Date.now() - ms) / 1000); if (s < 60) return s + "s ago"; if (s < 3600) return Math.round(s / 60) + "m ago"; return (s / 3600).toFixed(1) + "h ago"; }
+function dur(s) { s = Math.round(s || 0); if (s < 3600) return Math.floor(s / 60) + "m"; if (s < 86400) return (s / 3600).toFixed(1) + "h"; return (s / 86400).toFixed(1) + "d"; }
+function fmtTime(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"; }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function dl(pairs) { return pairs.map(([k, v, cls]) => `<dt>${esc(k)}</dt><dd class="${cls || ""}">${v}</dd>`).join(""); }
+
+async function api(method, url, body, raw) {
+  const headers = {};
+  if (adminToken) headers["x-admin-token"] = adminToken;
+  if (body !== undefined) headers["content-type"] = raw ? "text/plain" : "application/json";
+  const res = await fetch(url, { method, headers, body: body === undefined ? undefined : raw ? body : JSON.stringify(body) });
+  if (res.status === 401) {
+    adminToken = prompt("This server requires an admin token:") || "";
+    localStorage.setItem("adminToken", adminToken);
+    if (adminToken) return api(method, url, body, raw);
+  }
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  if (!res.ok) throw new Error(data.error || text || res.statusText);
+  return data;
+}
+
+async function load() {
+  try {
+    status = await api("GET", `/api/status?deviceId=${encodeURIComponent(deviceId())}`);
+  } catch (e) { toast("status failed: " + e.message, true); return; }
+  render();
+}
+
+function render() {
+  const s = status;
+  const bust = `&t=${s.now}`;
+  $("#hdr-sub").textContent = `${s.size}×${s.size} · server up ${dur(s.uptimeS)}`;
+
+  // device list
+  const sel = $("#device");
+  const cur = sel.value;
+  const ids = ["default", ...s.deviceIds, ...s.devices.map((d) => d.id)].filter((v, i, a) => a.indexOf(v) === i);
+  sel.innerHTML = ids.map((id) => `<option value="${esc(id)}">${esc(id)}</option>`).join("");
+  sel.value = ids.includes(cur) ? cur : "default";
+
+  // radar
+  const r = s.radar;
+  $("#radar-sub").textContent = r.productId;
+  $("#radar-stats").innerHTML = dl([
+    ["Frames", r.count, r.count ? "" : "bad"],
+    ["Newest scan", r.ageS == null ? "—" : dur(r.ageS) + " old", r.ageS > 1800 ? "warn" : ""],
+    ["Last fetch", ago(r.updatedAt)],
+    ["Status", r.lastError ? esc(r.lastError) : "OK", r.lastError ? "bad" : "ok"],
+  ]);
+  loadRadar(r.count, bust);
+
+  // weather
+  const w = s.weather;
+  $("#wx0").src = w.count ? `/api/bitmap/weather/0.png?scale=3${bust}` : "";
+  $("#wx1").src = w.count > 1 ? `/api/bitmap/weather/1.png?scale=3${bust}` : "";
+  $("#wx1").hidden = w.count < 2;
+  const d = w.data;
+  $("#weather-sub").textContent = d ? d.location : "";
+  $("#weather-stats").innerHTML = d
+    ? dl([
+        ["Now", `${Math.round(d.temp)}° ${esc(d.label)} (feels ${Math.round(d.feels)}°)`],
+        ["Today", `${Math.round(d.days[0]?.hi)}° / ${Math.round(d.days[0]?.lo)}° · rain ${d.rainToday ?? "—"}% · UV ${Math.round(d.days[0]?.uv ?? 0)}`],
+        ["Wind", `${Math.round(d.wind)} km/h ${esc(d.windDir)} · humidity ${d.humidity}%`],
+        ["Updated", ago(w.updatedAt) + (w.lastError ? ` · <span class="bad">${esc(w.lastError)}</span>` : "")],
+      ])
+    : dl([["Status", esc(w.lastError || "waiting for first fetch"), "bad"]]);
+
+  // message
+  const m = s.message;
+  $("#msg-preview").hidden = !m;
+  if (m) $("#msg-preview").src = `/api/bitmap/message/0.png?scale=2${bust}`;
+  $("#msg-status").innerHTML = m ? `Showing <b>${esc(m.text)}</b>${m.from ? " from " + esc(m.from) : ""} · ${dur(m.remainingS)} left` : "No active message.";
+  $("#msg-clear").hidden = !m;
+
+  // quote
+  $("#quote").src = `/api/bitmap/quote/0.png?scale=2&deviceId=${encodeURIComponent(deviceId())}${bust}`;
+  $("#quote-sub").textContent = s.quote;
+
+  // playlist
+  $("#manifest-rev").textContent = "rev " + s.manifest.rev;
+  $("#playlist").innerHTML = s.manifest.pages
+    .map((p) => p.type === "CLOCK"
+      ? `<span class="chip"><b>CLOCK</b> ${p.durationMs / 1000}s</span>`
+      : `<span class="chip"><b>${esc(p.name.toUpperCase())}</b> ${p.loops}× @ ${p.frameDelayMs}ms</span>`)
+    .join("");
+  $("#skipped").textContent = s.skipped.length ? "Skipped: " + s.skipped.map((k) => `${k.type}${k.name ? " " + k.name : ""} (${k.reason})`).join(", ") : "";
+  const b = s.defaults.bright;
+  $("#defaults").innerHTML = dl([
+    ["Brightness", `day ${b.day} · night ${b.night} (${String(b.nightStart).padStart(2, "0")}:00 → ${String(b.nightEnd).padStart(2, "0")}:00)`],
+    ["Timezone", esc(s.defaults.tz)],
+    ["Poll", s.defaults.pollMs / 1000 + "s"],
+    ["OTA", s.defaults.ota.enabled ? `enabled${s.defaults.ota.auto ? ", auto" : ""} · v${esc(s.defaults.ota.version || "?")}` : "off"],
+    ["Config", s.manifestError ? esc(s.manifestError) : "OK", s.manifestError ? "bad" : "ok"],
+  ]);
+
+  // devices
+  const tb = $("#devices tbody");
+  tb.innerHTML = s.devices.map((dv) => `<tr>
+      <td><span class="dot ${dv.online ? "on" : ""}"></span></td>
+      <td>${esc(dv.id)}</td><td>${esc(dv.page)}</td><td>${esc(dv.fw)}</td><td>${esc(dv.board)}</td>
+      <td>${dv.rssi ? dv.rssi + " dBm" : ""}</td><td>${dv.heapFree ? Math.round(dv.heapFree / 1024) + "k" : ""}${dv.psramFree ? " +" + Math.round(dv.psramFree / 1024) + "k" : ""}</td>
+      <td>${dur(dv.uptimeS)}</td><td>${esc(dv.ip)}</td><td>${ago(dv.lastSeen)}</td></tr>`).join("");
+  $("#devices-empty").textContent = s.devices.length ? "" : "No displays have checked in since the server started.";
+
+  // content
+  $("#content-dir").textContent = s.contentDir;
+  $("#content").innerHTML = s.content.length
+    ? s.content.map((a) => `<figure style="margin:0;text-align:center"><img class="pix" width="96" height="96" src="/api/bitmap/${esc(a.name)}/0.png?scale=2${bust}"><figcaption class="muted" style="font-size:12px">${esc(a.name)}<br>${a.count} frame${a.count === 1 ? "" : "s"}</figcaption></figure>`).join("")
+    : `<span class="muted">Drop PNG / JPG / GIF / WebP files into the content folder and reference them with a CONTENT page.</span>`;
+  $("#manifest-path").textContent = s.manifestPath;
+}
+
+function loadRadar(count, bust) {
+  clearInterval(radarTimer);
+  radarImgs = [];
+  const ctx = $("#radar").getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  if (!count) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, 256, 256); return; }
+  for (let i = 0; i < count; i++) { const im = new Image(); im.src = `/api/bitmap/radar/${i}.png?${bust.slice(1)}`; radarImgs.push(im); }
+  let idx = 0, hold = 0;
+  radarTimer = setInterval(() => {
+    const im = radarImgs[idx];
+    if (im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, 256, 256);
+    if (idx === count - 1 && hold < 3) { hold++; return; }
+    hold = 0; idx = (idx + 1) % count;
+  }, 450);
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch("/api/manifest/config");
+    $("#config").value = await res.text();
+    $("#config-msg").textContent = "";
+  } catch (e) { $("#config-msg").textContent = e.message; }
+}
+
+// ── wiring ──
+$("#device").addEventListener("change", load);
+$("#refresh").addEventListener("click", load);
+document.querySelectorAll("[data-post]").forEach((b) => b.addEventListener("click", async () => {
+  b.disabled = true;
+  try { await api("POST", b.dataset.post); toast("Done"); await load(); }
+  catch (e) { toast(e.message, true); }
+  b.disabled = false;
+}));
+$("#msgform").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("POST", "/api/message", { text: $("#msg-text").value, from: $("#msg-from").value, minutes: Number($("#msg-min").value) });
+    $("#msg-text").value = "";
+    toast("Message queued for the display");
+    await load();
+  } catch (e) { toast(e.message, true); }
+});
+$("#msg-clear").addEventListener("click", async () => { try { await api("DELETE", "/api/message"); await load(); } catch (e) { toast(e.message, true); } });
+$("#config-save").addEventListener("click", async () => {
+  try {
+    JSON.parse($("#config").value);
+    await api("PUT", "/api/manifest/config", $("#config").value, true);
+    $("#config-msg").textContent = "Saved. Displays pick it up on their next poll.";
+    $("#config-msg").className = "msg ok";
+    await load();
+    await loadConfig();
+  } catch (e) { $("#config-msg").textContent = e.message; $("#config-msg").className = "msg bad"; }
+});
+$("#config-reload").addEventListener("click", loadConfig);
+
+load();
+loadConfig();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

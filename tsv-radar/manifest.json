@@ -1,0 +1,36 @@
+{
+  "defaults": {
+    "pollMs": 60000,
+    "tz": "AEST-10",
+    "bright": { "day": 200, "night": 26, "nightStart": 22, "nightEnd": 7 },
+    "ota": { "enabled": false, "auto": false, "checkMs": 21600000, "version": "", "url": "" },
+    "quotes": [
+      "Stay curious.",
+      "Make something today.",
+      "Slow is smooth, smooth is fast.",
+      "Drink some water.",
+      "Go outside for a bit.",
+      "Done is better than perfect."
+    ],
+    "quoteRotateMinutes": 10,
+    "messageDurationMs": 8000
+  },
+  "pages": [
+    { "type": "RADAR", "loops": 5, "frameDelayMs": 450 },
+    { "type": "CLOCK", "durationMs": 10000 },
+    { "type": "WEATHER", "durationMs": 10000 },
+    { "type": "CLOCK", "durationMs": 10000 },
+    { "type": "QUOTE", "durationMs": 7000 }
+  ],
+  "devices": {
+    "example-kitchen": {
+      "bright": { "night": 10 },
+      "pages": [
+        { "type": "CLOCK", "durationMs": 15000 },
+        { "type": "WEATHER", "durationMs": 10000 },
+        { "type": "RADAR", "loops": 3, "frameDelayMs": 450 },
+        { "type": "CONTENT", "name": "family", "loops": 2, "enabled": false }
+      ]
+    }
+  }
+}

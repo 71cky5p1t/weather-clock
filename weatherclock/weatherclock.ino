@@ -1,0 +1,766 @@
+// weatherclock.ino — LED matrix weather clock, v2
+//
+// The display plays a playlist served by tsv-radar/server.js:
+//   CLOCK   pages are rendered locally (Mondrian 7-seg clock, seconds wipe)
+//   BITMAP  pages (radar loop, weather cards, quotes, messages, your own
+//           images) are fetched as ready-made 64x64 RGB565 frames.
+//
+// Highlights vs v1:
+//   - playlist, brightness schedule and timezone come from the server
+//   - next page's frames are prefetched on core 0 so transitions never stall
+//   - WiFi / NTP recovery, heartbeat to the dashboard, optional OTA
+//   - credentials live in secrets.h, pins in board.h
+//
+// Libraries: Adafruit Protomatter, Adafruit GFX, ArduinoJson (v7)
+
+#define FW_VERSION "2.0.0"
+
+#include "board.h"
+#include "secrets.h"
+#include "types.h"
+
+#include <Adafruit_Protomatter.h>
+#include <Adafruit_GFX.h>
+#include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <HTTPUpdate.h>
+#include <ArduinoJson.h>
+#include <esp_heap_caps.h>
+#include <time.h>
+
+// ── TUNABLES ─────────────────────────────────────────────────────
+static const int      MAX_FRAMES      = MAX_FRAMES_T; // per bitmap page (server NUM_FRAMES <= this)
+static const int      MAX_PAGES       = MAX_PAGES_T;
+static const uint32_t FADE_MS         = 700;       // fade-out and fade-in, each
+static const uint32_t CLOCK_TICK_MS   = 40;
+static const uint32_t HTTP_TIMEOUT_MS = 8000;
+static const uint32_t WIFI_GIVEUP_MS  = 5 * 60 * 1000;  // reboot if offline this long
+static const uint32_t OTA_RETRY_MS    = 60 * 60 * 1000;
+
+#define WIDTH  MATRIX_WIDTH
+#define HEIGHT MATRIX_HEIGHT
+static const int FRAME_PIXELS = WIDTH * HEIGHT;
+static const size_t FRAME_BYTES = FRAME_PIXELS * sizeof(uint16_t);
+
+// ── MATRIX ───────────────────────────────────────────────────────
+Adafruit_Protomatter matrix(
+  WIDTH, MATRIX_BITDEPTH, MATRIX_CHAINS,
+  RGB_PINS, NUM_ADDR_PINS, ADDR_PINS,
+  CLOCK_PIN, LATCH_PIN, OE_PIN, true
+);
+
+// ── CONFIG (from /api/manifest) ──────────────────────────────────
+static Config cfg;
+static bool   cfgFromServer = false;
+
+static void setDefaultConfig(Config &c) {
+  memset(&c, 0, sizeof(c));
+  c.pollMs = 60000;
+  strlcpy(c.tz, "AEST-10", sizeof(c.tz));
+  c.brightDay = 200;
+  c.brightNight = 26;
+  c.nightStart = 22;
+  c.nightEnd = 7;
+  strlcpy(c.rev, "none", sizeof(c.rev));
+  c.pageCount = 1;
+  c.pages[0].type = PAGE_CLOCK;
+  c.pages[0].durationMs = 10000;
+  strlcpy(c.pages[0].name, "clock", sizeof(c.pages[0].name));
+}
+
+// ── DEVICE IDENTITY ──────────────────────────────────────────────
+static char deviceId[32];
+
+static void initDeviceId() {
+#ifdef DEVICE_ID
+  strlcpy(deviceId, DEVICE_ID, sizeof(deviceId));
+#else
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  snprintf(deviceId, sizeof(deviceId), "mp-%02x%02x%02x", mac[3], mac[4], mac[5]);
+#endif
+}
+
+// ── BRIGHTNESS ───────────────────────────────────────────────────
+static uint8_t BRIGHT = 200;          // effective brightness used by col()
+static uint8_t scheduledBright = 200; // day/night value before fades
+
+static bool isNightHour(int h) {
+  if (cfg.nightStart == cfg.nightEnd) return false;
+  if (cfg.nightStart < cfg.nightEnd) return h >= cfg.nightStart && h < cfg.nightEnd;
+  return h >= cfg.nightStart || h < cfg.nightEnd; // wraps midnight
+}
+
+static bool getLocalTimeSafe(struct tm *info) {
+  time_t now = time(nullptr);
+  if (now < 1700000000) return false;
+  localtime_r(&now, info);
+  return true;
+}
+
+static void updateScheduledBright() {
+  struct tm info;
+  if (getLocalTimeSafe(&info)) scheduledBright = isNightHour(info.tm_hour) ? cfg.brightNight : cfg.brightDay;
+  else scheduledBright = cfg.brightDay;
+}
+
+static inline uint16_t col(uint8_t r, uint8_t g, uint8_t b) {
+  uint16_t rs = (uint16_t)((uint32_t)r * BRIGHT + 127) / 255;
+  uint16_t gs = (uint16_t)((uint32_t)g * BRIGHT + 127) / 255;
+  uint16_t bs = (uint16_t)((uint32_t)b * BRIGHT + 127) / 255;
+  return matrix.color565(rs, gs, bs);
+}
+
+static inline uint16_t scale565(uint16_t c, uint8_t a) {
+  uint16_t r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
+  r = (uint16_t)((uint32_t)r * a + 127) / 255;
+  g = (uint16_t)((uint32_t)g * a + 127) / 255;
+  b = (uint16_t)((uint32_t)b * a + 127) / 255;
+  return (r << 11) | (g << 5) | b;
+}
+
+// ── MONDRIAN CLOCK ───────────────────────────────────────────────
+static uint16_t MONDRIAN_RED()    { return col(227, 0, 15); }
+static uint16_t MONDRIAN_BLUE()   { return col(0, 48, 135); }
+static uint16_t MONDRIAN_YELLOW() { return col(255, 221, 0); }
+static uint16_t MONDRIAN_WHITE()  { return col(240, 240, 240); }
+static uint16_t MONDRIAN_BLACK()  { return col(0, 0, 0); }
+static uint16_t MONDRIAN_COLON()  { return col(200, 200, 200); }
+
+static void paletteFromRot(int rot, uint16_t &tl, uint16_t &tr, uint16_t &br, uint16_t &bl) {
+  uint16_t ring[4] = { MONDRIAN_RED(), MONDRIAN_BLUE(), MONDRIAN_WHITE(), MONDRIAN_YELLOW() };
+  tl = ring[(0 - rot + 4) & 3];
+  tr = ring[(1 - rot + 4) & 3];
+  br = ring[(2 - rot + 4) & 3];
+  bl = ring[(3 - rot + 4) & 3];
+}
+
+static const uint8_t DIGIT_MASK[10] = {
+  0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110,
+  0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111
+};
+
+static void fillRectWipe(int x, int y, int w, int h, uint16_t cTop, uint16_t cBot, int yCut) {
+  if (w <= 0 || h <= 0) return;
+  int yEnd = y + h;
+  if (yEnd <= yCut)      matrix.fillRect(x, y, w, h, cTop);
+  else if (y >= yCut)    matrix.fillRect(x, y, w, h, cBot);
+  else {
+    int hTop = yCut - y; if (hTop > 0) matrix.fillRect(x, y, w, hTop, cTop);
+    int hBot = yEnd - yCut; if (hBot > 0) matrix.fillRect(x, yCut, w, hBot, cBot);
+  }
+}
+
+static void drawSegmentRects(int x, int y, int w, int h, uint8_t mask, uint16_t cTop, uint16_t cBot, int yCut) {
+  int m = max(2, w / 10);
+  int t = max(3, min(w, h) / 7);
+  int x0 = x + m, x1 = x + w - m;
+  int y0 = y + m, y1 = y + h - m;
+  int mid = (y0 + y1) / 2;
+
+  if (mask & (1 << 0)) fillRectWipe(x0, y0,        x1 - x0, t, cTop, cBot, yCut); // A
+  if (mask & (1 << 6)) fillRectWipe(x0, mid - t/2, x1 - x0, t, cTop, cBot, yCut); // G
+  if (mask & (1 << 3)) fillRectWipe(x0, y1 - t,    x1 - x0, t, cTop, cBot, yCut); // D
+
+  bool gOn = (mask & (1 << 6)) != 0;
+  int halfTop = gOn ? (mid - y0 - t/2) : (mid - y0);
+  int halfBot = gOn ? (y1 - (mid + t/2)) : (y1 - mid);
+  if (halfTop < 0) halfTop = 0;
+  if (halfBot < 0) halfBot = 0;
+
+  if (mask & (1 << 5)) fillRectWipe(x0,     y0,  t, halfTop, cTop, cBot, yCut); // F
+  if (mask & (1 << 4)) fillRectWipe(x0,     mid, t, halfBot, cTop, cBot, yCut); // E
+  if (mask & (1 << 1)) fillRectWipe(x1 - t, y0,  t, halfTop, cTop, cBot, yCut); // B
+  if (mask & (1 << 2)) fillRectWipe(x1 - t, mid, t, halfBot, cTop, cBot, yCut); // C
+}
+
+static void drawDigitInCell(uint8_t d, int cx, int cy, int cw, int ch, uint16_t cTop, uint16_t cBot, int yCut) {
+  if (d > 9) d = 0;
+  drawSegmentRects(cx, cy, cw, ch, DIGIT_MASK[d], cTop, cBot, yCut);
+}
+
+static void drawColonWipe(bool on, int yCut) {
+  int cx = WIDTH / 2 - 1;
+  uint16_t c = on ? MONDRIAN_COLON() : MONDRIAN_BLACK();
+  fillRectWipe(cx, HEIGHT / 2 - 7, 2, 2, c, c, yCut);
+  fillRectWipe(cx, HEIGHT / 2 + 7, 2, 2, c, c, yCut);
+}
+
+static void drawClockDigits(int hh, int mm, int ss, bool colonOn) {
+  matrix.fillScreen(MONDRIAN_BLACK());
+  const int cell = WIDTH / 2;
+  int yCut = ((ss + 1) * HEIGHT) / 60;
+  yCut = constrain(yCut, 0, HEIGHT);
+
+  int rotCur = mm & 3, rotPrev = (mm + 3) & 3;
+  uint16_t TLc, TRc, BRc, BLc, TLp, TRp, BRp, BLp;
+  paletteFromRot(rotCur, TLc, TRc, BRc, BLc);
+  paletteFromRot(rotPrev, TLp, TRp, BRp, BLp);
+
+  drawDigitInCell((hh / 10) % 10, 0,    0,    cell, cell, TLc, TLp, yCut);
+  drawDigitInCell(hh % 10,        cell, 0,    cell, cell, TRc, TRp, yCut);
+  drawDigitInCell((mm / 10) % 10, 0,    cell, cell, cell, BLc, BLp, yCut);
+  drawDigitInCell(mm % 10,        cell, cell, cell, cell, BRc, BRp, yCut);
+  drawColonWipe(colonOn, yCut);
+}
+
+// Render the clock at (scheduled brightness × alpha).
+static void renderClock(uint8_t alpha) {
+  struct tm info;
+  BRIGHT = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
+  if (!getLocalTimeSafe(&info)) {
+    // No time yet: show dashes so it's obvious rather than "00:00".
+    matrix.fillScreen(0);
+    matrix.setTextColor(col(120, 120, 120));
+    matrix.setCursor(8, 28);
+    matrix.print("--:--");
+    matrix.show();
+    return;
+  }
+  drawClockDigits(info.tm_hour, info.tm_min, info.tm_sec, (info.tm_sec % 2) == 0);
+  matrix.show();
+}
+
+// ── STATUS SCREEN ────────────────────────────────────────────────
+static void showStatus(const char *l1, const char *l2 = nullptr, const char *l3 = nullptr, uint16_t colour = 0) {
+  BRIGHT = scheduledBright;
+  matrix.fillScreen(0);
+  matrix.setTextWrap(false);
+  matrix.setTextSize(1);
+  matrix.setTextColor(colour ? colour : col(255, 221, 0));
+  matrix.setCursor(2, 18); if (l1) matrix.print(l1);
+  matrix.setTextColor(col(200, 200, 200));
+  matrix.setCursor(2, 30); if (l2) matrix.print(l2);
+  matrix.setCursor(2, 42); if (l3) matrix.print(l3);
+  matrix.show();
+}
+
+// ── FRAME POOLS ──────────────────────────────────────────────────
+static FramePool pools[2];
+static int poolCount = 0;
+static uint16_t *fadeTmp = nullptr;
+
+static void allocPools() {
+  bool psram = psramFound();
+  size_t bytes = (size_t)MAX_FRAMES * FRAME_BYTES;
+  int want = psram ? 2 : 1;
+  for (int i = 0; i < want; i++) {
+    void *p = psram ? heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM) : malloc(bytes);
+    if (!p && psram) p = malloc(bytes);
+    if (!p) break;
+    pools[i].data = (uint16_t *)p;
+    pools[i].count = 0;
+    pools[i].ready = false;
+    pools[i].name[0] = 0;
+    poolCount = i + 1;
+  }
+  fadeTmp = (uint16_t *)malloc(FRAME_BYTES);
+  Serial.printf("pools: %d (psram=%d) heap=%lu psram=%lu\n", poolCount, psram, (unsigned long)ESP.getFreeHeap(), (unsigned long)ESP.getFreePsram());
+}
+
+static inline uint16_t *poolFrame(FramePool &p, int i) { return p.data + (size_t)i * FRAME_PIXELS; }
+
+// Draw a pooled frame at (scheduled brightness × alpha).
+static void renderBitmap(FramePool &p, int frame, uint8_t alpha) {
+  if (!p.ready || p.count <= 0) return;
+  frame = constrain(frame, 0, p.count - 1);
+  uint8_t total = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
+  uint16_t *src = poolFrame(p, frame);
+  if (total == 255) {
+    matrix.drawRGBBitmap(0, 0, src, WIDTH, HEIGHT);
+  } else {
+    for (int i = 0; i < FRAME_PIXELS; i++) fadeTmp[i] = scale565(src[i], total);
+    matrix.drawRGBBitmap(0, 0, fadeTmp, WIDTH, HEIGHT);
+  }
+  matrix.show();
+}
+
+// ── HTTP ─────────────────────────────────────────────────────────
+static String apiUrl(const String &path) {
+  String u = String(SERVER_BASE_URL) + path;
+  u += (path.indexOf('?') >= 0) ? "&" : "?";
+  u += "deviceId=";
+  u += deviceId;
+  return u;
+}
+
+static bool httpGetString(HTTPClient &http, const String &url, String &out) {
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(4000);
+  if (!http.begin(url)) return false;
+  int code = http.GET();
+  if (code != 200) { Serial.printf("GET %s -> %d\n", url.c_str(), code); http.end(); return false; }
+  out = http.getString();
+  http.end();
+  return true;
+}
+
+// Fetch one RGB565 big-endian frame straight into dst.
+static bool httpGetFrame(HTTPClient &http, const String &url, uint16_t *dst) {
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(4000);
+  if (!http.begin(url)) return false;
+  int code = http.GET();
+  if (code != 200) { http.end(); return false; }
+  int len = http.getSize();
+  if (len > 0 && len != (int)FRAME_BYTES) { http.end(); return false; }
+
+  WiFiClient *s = http.getStreamPtr();
+  uint8_t buf[512];
+  size_t got = 0;
+  uint32_t deadline = millis() + HTTP_TIMEOUT_MS;
+  uint8_t *out = (uint8_t *)dst;
+  while (got < FRAME_BYTES) {
+    if (millis() > deadline) { http.end(); return false; }
+    size_t avail = s->available();
+    if (!avail) { if (!s->connected()) { http.end(); return false; } delay(1); continue; }
+    size_t n = s->readBytes(buf, min(avail, min(sizeof(buf), FRAME_BYTES - got)));
+    memcpy(out + got, buf, n);
+    got += n;
+  }
+  http.end();
+  // big-endian on the wire -> native uint16
+  for (int i = 0; i < FRAME_PIXELS; i++) dst[i] = (uint16_t)(out[i * 2] << 8) | out[i * 2 + 1];
+  return true;
+}
+
+// Load bitmap `name` (meta + frames) into a pool. Runs on either core.
+static bool loadBitmapInto(FramePool &p, const char *name) {
+  p.ready = false;
+  p.count = 0;
+  HTTPClient http;
+  http.setReuse(true);
+
+  String meta;
+  if (!httpGetString(http, apiUrl(String("/api/bitmap/") + name), meta)) return false;
+
+  JsonDocument doc;
+  if (deserializeJson(doc, meta)) return false;
+  int count = doc["count"] | 0;
+  uint32_t delayMs = doc["frameDelayMs"] | 0;
+  if (count <= 0) return false;
+  if (count > MAX_FRAMES) count = MAX_FRAMES;
+
+  for (int i = 0; i < count; i++) {
+    String url = apiUrl(String("/api/bitmap/") + name + "/" + String(i) + ".bin");
+    if (!httpGetFrame(http, url, poolFrame(p, i))) {
+      Serial.printf("frame %d of %s failed\n", i, name);
+      return false;
+    }
+  }
+  p.count = count;
+  p.frameDelayMs = delayMs;
+  strlcpy(p.name, name, sizeof(p.name));
+  p.loadedAt = millis();
+  p.ready = true;
+  return true;
+}
+
+// ── BACKGROUND FETCH TASK (core 0) ───────────────────────────────
+struct FetchJob {
+  volatile bool pending;
+  volatile bool busy;
+  volatile bool ok;
+  int  poolIdx;
+  char name[24];
+};
+static FetchJob job = {};
+
+static void fetchTask(void *) {
+  for (;;) {
+    if (job.pending) {
+      job.pending = false;
+      job.busy = true;
+      job.ok = loadBitmapInto(pools[job.poolIdx], job.name);
+      Serial.printf("[fetch] %s -> %s (%d frames)\n", job.name, job.ok ? "ok" : "FAIL", pools[job.poolIdx].count);
+      job.busy = false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+static void requestPrefetch(int poolIdx, const char *name) {
+  if (job.busy || job.pending) return;
+  job.poolIdx = poolIdx;
+  strlcpy(job.name, name, sizeof(job.name));
+  job.ok = false;
+  job.pending = true;
+}
+
+static void waitForFetchIdle(uint32_t maxMs) {
+  uint32_t t0 = millis();
+  while ((job.busy || job.pending) && millis() - t0 < maxMs) delay(10);
+}
+
+// ── MANIFEST ─────────────────────────────────────────────────────
+static bool parseManifest(const String &json, Config &out) {
+  JsonDocument doc;
+  if (deserializeJson(doc, json)) return false;
+  if ((doc["v"] | 0) != 2) return false;
+
+  setDefaultConfig(out);
+  out.pollMs = max((uint32_t)15000, (uint32_t)(doc["pollMs"] | 60000));
+  strlcpy(out.tz, doc["tz"] | "AEST-10", sizeof(out.tz));
+  out.brightDay   = doc["bright"]["day"]   | 200;
+  out.brightNight = doc["bright"]["night"] | 26;
+  out.nightStart  = doc["bright"]["nightStart"] | 22;
+  out.nightEnd    = doc["bright"]["nightEnd"]   | 7;
+  out.otaEnabled  = doc["ota"]["enabled"] | false;
+  out.otaAuto     = doc["ota"]["auto"]    | false;
+  strlcpy(out.otaVersion, doc["ota"]["version"] | "", sizeof(out.otaVersion));
+  strlcpy(out.otaUrl,     doc["ota"]["url"]     | "", sizeof(out.otaUrl));
+  strlcpy(out.rev,        doc["rev"]            | "?", sizeof(out.rev));
+
+  out.pageCount = 0;
+  for (JsonObject p : doc["pages"].as<JsonArray>()) {
+    if (out.pageCount >= MAX_PAGES) break;
+    Page &pg = out.pages[out.pageCount];
+    memset(&pg, 0, sizeof(pg));
+    const char *type = p["type"] | "";
+    if (!strcmp(type, "CLOCK")) {
+      pg.type = PAGE_CLOCK;
+      strlcpy(pg.name, "clock", sizeof(pg.name));
+      pg.durationMs = p["durationMs"] | 10000;
+    } else if (!strcmp(type, "BITMAP")) {
+      const char *name = p["name"] | "";
+      if (!*name) continue;
+      pg.type = PAGE_BITMAP;
+      strlcpy(pg.name, name, sizeof(pg.name));
+      pg.loops = max(1, (int)(p["loops"] | 1));
+      pg.frameDelayMs = p["frameDelayMs"] | 450;
+      pg.durationMs = p["durationMs"] | 0;
+    } else continue;
+    out.pageCount++;
+  }
+  if (out.pageCount == 0) {
+    out.pageCount = 1;
+    out.pages[0].type = PAGE_CLOCK;
+    out.pages[0].durationMs = 10000;
+    strlcpy(out.pages[0].name, "clock", sizeof(out.pages[0].name));
+  }
+  return true;
+}
+
+static uint32_t lastPoll = 0;
+static bool     lastPollOk = false;
+static int      curPage = 0;
+
+static void applyTimezone(const char *tz) {
+  configTzTime(tz, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+}
+
+static bool fetchManifest() {
+  HTTPClient http;
+  String body;
+  if (!httpGetString(http, apiUrl("/api/manifest"), body)) return false;
+  Config next;
+  if (!parseManifest(body, next)) { Serial.println("manifest parse failed"); return false; }
+
+  bool tzChanged = strcmp(next.tz, cfg.tz) != 0;
+  bool changed = strcmp(next.rev, cfg.rev) != 0;
+  if (changed || !cfgFromServer) {
+    cfg = next;
+    cfgFromServer = true;
+    if (curPage >= cfg.pageCount) curPage = 0;
+    Serial.printf("manifest rev %s: %d pages, poll %lus, bright %d/%d (%d-%d)\n",
+                  cfg.rev, cfg.pageCount, (unsigned long)(cfg.pollMs / 1000),
+                  cfg.brightDay, cfg.brightNight, cfg.nightStart, cfg.nightEnd);
+    if (tzChanged) applyTimezone(cfg.tz);
+  }
+  return true;
+}
+
+static void sendHeartbeat() {
+  HTTPClient http;
+  http.setTimeout(4000);
+  http.setConnectTimeout(3000);
+  if (!http.begin(String(SERVER_BASE_URL) + "/api/device/heartbeat")) return;
+  http.addHeader("Content-Type", "application/json");
+  JsonDocument doc;
+  doc["deviceId"]    = deviceId;
+  doc["fw"]          = FW_VERSION;
+  doc["board"]       = BOARD_NAME;
+  doc["uptimeS"]     = millis() / 1000;
+  doc["rssi"]        = WiFi.RSSI();
+  doc["heapFree"]    = ESP.getFreeHeap();
+  doc["psramFree"]   = ESP.getFreePsram();
+  doc["page"]        = cfg.pages[curPage].name;
+  doc["manifestRev"] = cfg.rev;
+  doc["bright"]      = scheduledBright;
+  String body;
+  serializeJson(doc, body);
+  http.POST(body);
+  http.end();
+}
+
+// ── OTA ──────────────────────────────────────────────────────────
+static char     otaTriedVersion[24] = "";
+static uint32_t otaTriedAt = 0;
+
+static void maybeOta() {
+  if (!cfg.otaEnabled || !cfg.otaAuto || !cfg.otaUrl[0] || !cfg.otaVersion[0]) return;
+  if (!strcmp(cfg.otaVersion, FW_VERSION)) return;
+  if (!strcmp(cfg.otaVersion, otaTriedVersion) && millis() - otaTriedAt < OTA_RETRY_MS) return;
+
+  strlcpy(otaTriedVersion, cfg.otaVersion, sizeof(otaTriedVersion));
+  otaTriedAt = millis();
+  Serial.printf("OTA: %s -> %s from %s\n", FW_VERSION, cfg.otaVersion, cfg.otaUrl);
+  showStatus("UPDATING", cfg.otaVersion, "don't unplug", col(255, 120, 0));
+  waitForFetchIdle(HTTP_TIMEOUT_MS + 2000);
+
+  WiFiClient client;
+  httpUpdate.rebootOnUpdate(true);
+  t_httpUpdate_return ret = httpUpdate.update(client, cfg.otaUrl);
+  if (ret == HTTP_UPDATE_FAILED) {
+    Serial.printf("OTA failed: %s\n", httpUpdate.getLastErrorString().c_str());
+    showStatus("OTA FAILED", httpUpdate.getLastErrorString().c_str(), nullptr, col(227, 0, 15));
+    delay(3000);
+  }
+}
+
+// ── WIFI ─────────────────────────────────────────────────────────
+static uint32_t wifiLostAt = 0;
+
+static bool ensureWifi() {
+  if (WiFi.status() == WL_CONNECTED) { wifiLostAt = 0; return true; }
+  uint32_t now = millis();
+  if (!wifiLostAt) { wifiLostAt = now; WiFi.reconnect(); Serial.println("wifi lost, reconnecting"); }
+  else if (now - wifiLostAt > WIFI_GIVEUP_MS) { Serial.println("wifi down too long, rebooting"); ESP.restart(); }
+  return false;
+}
+
+// ── PLAYER STATE MACHINE ─────────────────────────────────────────
+enum Phase : uint8_t { PH_FADE_IN, PH_SHOW, PH_FADE_OUT };
+
+static Phase    phase = PH_FADE_IN;
+static uint32_t tPhase = 0;
+static int      curPool = -1;      // pool index for the current BITMAP page
+static int      frameIdx = 0;
+static int      loopIdx = 0;
+static uint32_t tNextFrame = 0;
+static uint32_t curFrameDelay = 450;
+static bool     prefetchArmed = false;
+static uint8_t  pageFailStreak = 0;
+
+static inline Page &page() { return cfg.pages[curPage]; }
+static inline bool singlePage() { return cfg.pageCount <= 1; }
+
+static int nextPageIndex(int from) { return (from + 1) % cfg.pageCount; }
+
+static int findReadyPool(const char *name) {
+  int best = -1;
+  for (int i = 0; i < poolCount; i++) {
+    if (!pools[i].ready || strcmp(pools[i].name, name)) continue;
+    if (best < 0 || (int32_t)(pools[i].loadedAt - pools[best].loadedAt) > 0) best = i;
+  }
+  return best;
+}
+
+// Make sure the page's bitmap is in a pool. Returns pool index or -1.
+static int ensureLoaded(Page &pg) {
+  // Was it prefetched?
+  waitForFetchIdle(HTTP_TIMEOUT_MS * 2);
+  int idx = findReadyPool(pg.name);
+  if (idx >= 0) return idx;
+
+  // Pick a pool that isn't the one currently on screen (if we have two).
+  int target = (poolCount > 1 && curPool == 0) ? 1 : 0;
+  if (poolCount == 1) target = 0;
+  if (loadBitmapInto(pools[target], pg.name)) return target;
+  return -1;
+}
+
+static void armPrefetchForNext() {
+  if (prefetchArmed || poolCount < 2) return;
+  prefetchArmed = true;
+  // find the next BITMAP page after the current one
+  int idx = curPage;
+  for (int n = 0; n < cfg.pageCount; n++) {
+    idx = nextPageIndex(idx);
+    if (cfg.pages[idx].type == PAGE_BITMAP) {
+      const char *name = cfg.pages[idx].name;
+      int have = findReadyPool(name);
+      // Already prefetched during an earlier page (and not the copy on screen)? Keep it.
+      if (have >= 0 && have != curPool && millis() - pools[have].loadedAt < 120000) return;
+      int other = (curPool == 0) ? 1 : 0;
+      requestPrefetch(other, name);
+      return;
+    }
+  }
+}
+
+static void enterShow(uint32_t now) {
+  phase = PH_SHOW;
+  tPhase = now;
+  frameIdx = 0;
+  loopIdx = 0;
+  tNextFrame = now;
+  prefetchArmed = false;
+}
+
+static void startPage(int idx, uint32_t now) {
+  curPage = idx;
+  Page &pg = page();
+  if (pg.type == PAGE_BITMAP) {
+    int p = ensureLoaded(pg);
+    if (p < 0) {
+      Serial.printf("page %s unavailable, skipping\n", pg.name);
+      if (++pageFailStreak >= cfg.pageCount) {
+        // Nothing loadable right now: curPool = -1 makes the player show the
+        // clock in this slot for ~15 s, then it tries the playlist again.
+        pageFailStreak = 0;
+        curPool = -1;
+        phase = PH_FADE_IN;
+        tPhase = now;
+        return;
+      }
+      startPage(nextPageIndex(idx), now);
+      return;
+    }
+    curPool = p;
+    curFrameDelay = pg.frameDelayMs ? pg.frameDelayMs : pools[p].frameDelayMs;
+    if (curFrameDelay < 50) curFrameDelay = 450;
+  } else {
+    curPool = -1;
+  }
+  pageFailStreak = 0;
+  phase = PH_FADE_IN;
+  tPhase = now;
+  Serial.printf("[page] %s\n", pg.name);
+}
+
+static void renderCurrent(uint8_t alpha, int frame) {
+  if (page().type == PAGE_BITMAP && curPool >= 0) renderBitmap(pools[curPool], frame, alpha);
+  else renderClock(alpha);
+}
+
+static void maybePoll(uint32_t now, bool force) {
+  uint32_t interval = lastPollOk ? cfg.pollMs : 20000;
+  if (!force && now - lastPoll < interval) return;
+  lastPoll = now;
+  if (!ensureWifi()) { lastPollOk = false; return; }
+  lastPollOk = fetchManifest();
+  sendHeartbeat();
+  maybeOta();
+}
+
+// ── SETUP / LOOP ─────────────────────────────────────────────────
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+  Serial.printf("\nweatherclock %s (%s)\n", FW_VERSION, BOARD_NAME);
+
+  setDefaultConfig(cfg);
+
+  ProtomatterStatus st = matrix.begin();
+  if (st != PROTOMATTER_OK) {
+    Serial.printf("Protomatter error %d\n", st);
+    for (;;) delay(1000);
+  }
+  matrix.fillScreen(0);
+  matrix.show();
+
+  allocPools();
+  if (poolCount == 0 || !fadeTmp) {
+    showStatus("NO MEMORY", "for frames", nullptr, col(227, 0, 15));
+    for (;;) delay(1000);
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.setAutoReconnect(true);
+  initDeviceId();
+  showStatus("WIFI...", WIFI_SSID, deviceId);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 20000) delay(200);
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("wifi ok %s rssi %d\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    showStatus("ONLINE", WiFi.localIP().toString().c_str(), deviceId, col(30, 200, 80));
+  } else {
+    Serial.println("wifi failed, continuing offline");
+    showStatus("NO WIFI", "retrying...", deviceId, col(227, 0, 15));
+  }
+
+  applyTimezone(cfg.tz);
+  uint32_t ts = millis();
+  while (time(nullptr) < 1700000000 && millis() - ts < 8000) delay(200);
+
+  xTaskCreatePinnedToCore(fetchTask, "fetch", 12288, nullptr, 1, nullptr, 0);
+
+  maybePoll(millis(), true);
+  updateScheduledBright();
+  startPage(0, millis());
+}
+
+void loop() {
+  const uint32_t now = millis();
+  updateScheduledBright();
+
+  Page &pg = page();
+  const bool isClock = (pg.type != PAGE_BITMAP) || curPool < 0;
+
+  switch (phase) {
+    case PH_FADE_IN: {
+      if (singlePage() && isClock) { enterShow(now); break; }
+      uint32_t dt = now - tPhase;
+      if (dt >= FADE_MS) { renderCurrent(255, 0); enterShow(now); break; }
+      renderCurrent((uint8_t)(dt * 255 / FADE_MS), 0);
+      delay(10);
+    } break;
+
+    case PH_SHOW: {
+      if (!prefetchArmed) armPrefetchForNext();
+
+      if (isClock) {
+        renderClock(255);
+        maybePoll(now, false);                       // cheap moment to talk to the server
+        uint32_t dur = pg.type == PAGE_CLOCK ? pg.durationMs : 15000;
+        if (now - tPhase >= dur) {
+          if (!singlePage())              { phase = PH_FADE_OUT; tPhase = now; }
+          else if (pg.type == PAGE_BITMAP) startPage(curPage, now);   // lone bitmap page failed earlier: retry
+        }
+        delay(CLOCK_TICK_MS);
+        break;
+      }
+
+      FramePool &pool = pools[curPool];
+      if (now >= tNextFrame) {
+        if (frameIdx >= pool.count) {
+          frameIdx = 0;
+          loopIdx++;
+          bool done = loopIdx >= pg.loops;
+          if (pg.durationMs && now - tPhase >= pg.durationMs) done = true;
+          if (done) {
+            if (singlePage()) {                        // single bitmap page: loop forever, refreshing
+              loopIdx = 0;
+              int fresh = findReadyPool(pg.name);
+              if (fresh >= 0) curPool = fresh;
+              prefetchArmed = false;
+            }
+            else { phase = PH_FADE_OUT; tPhase = now; break; }
+          }
+        }
+        renderBitmap(pool, frameIdx, 255);
+        frameIdx++;
+        tNextFrame = now + curFrameDelay;
+        if (frameIdx == 1 && loopIdx == 0) maybePoll(now, false);  // once, right after the first frame
+      }
+      delay(5);
+    } break;
+
+    case PH_FADE_OUT: {
+      uint32_t dt = now - tPhase;
+      int lastFrame = isClock ? 0 : max(0, frameIdx - 1);
+      if (dt >= FADE_MS) {
+        renderCurrent(0, lastFrame);
+        startPage(nextPageIndex(curPage), now);
+        break;
+      }
+      renderCurrent((uint8_t)(255 - dt * 255 / FADE_MS), lastFrame);
+      delay(10);
+    } break;
+  }
+}
