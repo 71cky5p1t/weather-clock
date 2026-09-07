@@ -76,9 +76,8 @@ static void initDeviceId() {
 #ifdef DEVICE_ID
   strlcpy(deviceId, DEVICE_ID, sizeof(deviceId));
 #else
-  uint8_t mac[6];
-  WiFi.macAddress(mac);
-  snprintf(deviceId, sizeof(deviceId), "mp-%02x%02x%02x", mac[3], mac[4], mac[5]);
+  uint64_t mac = ESP.getEfuseMac();   // factory MAC, valid before WiFi starts
+  snprintf(deviceId, sizeof(deviceId), "mp-%06lx", (unsigned long)((mac >> 24) & 0xFFFFFF));
 #endif
 }
 
