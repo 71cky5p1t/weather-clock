@@ -194,16 +194,32 @@ static void drawDigitInCell(uint8_t d, int cx, int cy, int cw, int ch, uint16_t 
 // Flux-style layout: digits share the row width in proportion to how much
 // room they need. A "1" is narrow, everything else is wide, and a single-digit
 // hour stretches across the whole row.
+// Quirk (mirrors tsv-radar/lib/clock.js): the last hour digit, if it is a
+// 4/7/1, drops its right-hand stem through the minute row; the first minute
+// digit, if 4/1, raises its left stem through the hour row. Rows squeeze
+// sideways to make room.
+static const int STEM_GAP = 3;
+
 static int digitWeight(int d) { return d == 1 ? 40 : 100; }
 
-static void layoutRow(const int *digits, int n, int *xs, int *ws) {
+static void layoutRow(const int *digits, int n, Cell *cells, int rx0, int rx1) {
   int total = 0;
   for (int i = 0; i < n; i++) total += digitWeight(digits[i]);
-  int x = 0;
+  int width = rx1 - rx0, x = rx0;
   for (int i = 0; i < n; i++) {
-    int w = (i == n - 1) ? (WIDTH - x) : (WIDTH * digitWeight(digits[i])) / total;
-    xs[i] = x; ws[i] = w; x += w;
+    int w = (i == n - 1) ? (rx1 - x) : (width * digitWeight(digits[i])) / total;
+    cells[i] = { digits[i], x, w };
+    x += w;
   }
+}
+
+// x of a stem that can extend out of its cell, or -1.
+static int stemX(const Cell &c, bool rightSide) {
+  int x0 = c.x + DIGIT_MARGIN_X, x1 = c.x + c.w - DIGIT_MARGIN_X;
+  if (c.d == 1) return (x0 + x1) / 2 - DIGIT_STROKE / 2;
+  if (rightSide && (c.d == 4 || c.d == 7)) return x1 - DIGIT_STROKE;
+  if (!rightSide && c.d == 4) return x0;
+  return -1;
 }
 
 static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
@@ -217,18 +233,39 @@ static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
   paletteFromRot(rotCur, TLc, TRc, BRc, BLc);
   paletteFromRot(rotPrev, TLp, TRp, BRp, BLp);
 
-  // hours: one wide digit before 10:00, two weighted digits after
-  int hd[2], hx[2], hw[2], hn;
+  int hd[2], hn;
   if (hh < 10) { hd[0] = hh; hn = 1; } else { hd[0] = hh / 10; hd[1] = hh % 10; hn = 2; }
-  layoutRow(hd, hn, hx, hw);
-  drawDigitInCell(hd[0], hx[0], 0, hw[0], rowH, TLc, TLp, yCut);
-  if (hn == 2) drawDigitInCell(hd[1], hx[1], 0, hw[1], rowH, TRc, TRp, yCut);
+  int md[2] = { mm / 10, mm % 10 };
+  Cell hc[2], mc[2];
 
-  // minutes: always two digits
-  int md[2] = { mm / 10, mm % 10 }, mx[2], mw[2];
-  layoutRow(md, 2, mx, mw);
-  drawDigitInCell(md[0], mx[0], rowH, mw[0], rowH, BLc, BLp, yCut);
-  drawDigitInCell(md[1], mx[1], rowH, mw[1], rowH, BRc, BRp, yCut);
+  // pass 1: full-width layout to find the stems that will extend
+  layoutRow(hd, hn, hc, 0, WIDTH);
+  layoutRow(md, 2, mc, 0, WIDTH);
+  int descX = stemX(hc[hn - 1], true);
+  int ascX  = stemX(mc[0], false);
+  if (hc[hn - 1].d == 1 && mc[0].d == 1) ascX = -1;   // two tall 1s dissolve the rows
+
+  // pass 2: squeeze each row away from the other's stem
+  int hx0 = (ascX >= 0) ? ascX + DIGIT_STROKE + STEM_GAP : 0;
+  int mx1 = (descX >= 0) ? descX - STEM_GAP : WIDTH;
+  layoutRow(hd, hn, hc, hx0, WIDTH);
+  layoutRow(md, 2, mc, 0, mx1);
+
+  drawDigitInCell(hc[0].d, hc[0].x, 0, hc[0].w, rowH, TLc, TLp, yCut);
+  if (hn == 2) drawDigitInCell(hc[1].d, hc[1].x, 0, hc[1].w, rowH, TRc, TRp, yCut);
+  drawDigitInCell(mc[0].d, mc[0].x, rowH, mc[0].w, rowH, BLc, BLp, yCut);
+  drawDigitInCell(mc[1].d, mc[1].x, rowH, mc[1].w, rowH, BRc, BRp, yCut);
+
+  // extensions through the other row
+  if (descX >= 0) {
+    int sx = stemX(hc[hn - 1], true);
+    uint16_t cc = (hn == 1) ? TLc : TRc, cp = (hn == 1) ? TLp : TRp;
+    fillRectWipe(sx, rowH - DIGIT_MARGIN_Y, DIGIT_STROKE, HEIGHT - rowH, cc, cp, yCut);
+  }
+  if (ascX >= 0) {
+    int sx = stemX(mc[0], false);
+    fillRectWipe(sx, DIGIT_MARGIN_Y, DIGIT_STROKE, rowH, BLc, BLp, yCut);
+  }
 }
 
 // Draw the clock into the canvas at (scheduled brightness × alpha); no show().

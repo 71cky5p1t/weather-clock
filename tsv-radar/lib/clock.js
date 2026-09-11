@@ -14,6 +14,9 @@ export const GEOMETRY = {
   strokeDiv: 0,      // if >0, stroke grows with digit width: max(stroke, drawnWidth / strokeDiv)
   oneStyle: "centered", // "centered" bar for 1s, or "seg" for classic right-side 1
   leadingZero: 0,    // 1 = always two hour digits (09:41), 0 = single digit spans the row (Flux)
+  quirk: 1,          // 1 = interlocking stems: last hour digit 4/7/1 drops through the minute
+                     //     row, first minute digit 4/1 rises through the hour row; rows squeeze
+  stemGap: 3,        // px between an extended stem and the squeezed row
 };
 
 const RING = [C.red, C.blue, C.white, C.yellow];
@@ -64,16 +67,27 @@ function drawDigit(cv, d, x, y, w, h, top, bottom, yCut, g) {
   if (mask & (1 << 2)) fillWipe(cv, x1 - t, mid, t, halfBot, top, bottom, yCut);                  // C
 }
 
-function layoutRow(digits, width, g) {
+function layoutRow(digits, g, rx0 = 0, rx1 = 64) {
   const weights = digits.map((d) => (d === 1 ? g.weightNarrow : g.weightWide));
   const total = weights.reduce((a, b) => a + b, 0);
-  let x = 0;
+  const width = rx1 - rx0;
+  let x = rx0;
   return digits.map((d, i) => {
-    const w = i === digits.length - 1 ? width - x : Math.floor((width * weights[i]) / total);
+    const w = i === digits.length - 1 ? rx1 - x : Math.floor((width * weights[i]) / total);
     const cell = { d, x, w };
     x += w;
     return cell;
   });
+}
+
+// x of the stem that can extend out of a cell: right stem for 4/7, the bar for a 1, left stem for 4.
+function stemX(cell, g, side) {
+  const t = g.stroke;
+  const x0 = cell.x + g.marginX, x1 = cell.x + cell.w - g.marginX;
+  if (cell.d === 1 && g.oneStyle === "centered") return Math.floor((x0 + x1) / 2 - t / 2);
+  if (side === "right" && (cell.d === 4 || cell.d === 7)) return x1 - t;
+  if (side === "left" && cell.d === 4) return x0;
+  return null;
 }
 
 export function renderClock(hh, mm, ss, size = 64, geometry = {}) {
@@ -85,13 +99,42 @@ export function renderClock(hh, mm, ss, size = 64, geometry = {}) {
   const prev = paletteFromRot((mm + 3) & 3);
 
   const hours = hh < 10 && !g.leadingZero ? [hh] : [Math.floor(hh / 10), hh % 10];
-  const hcells = layoutRow(hours, size, g);
+  const minutes = [Math.floor(mm / 10), mm % 10];
+
+  // Pass 1: lay both rows out at full width to find the stems that will extend.
+  let hcells = layoutRow(hours, g, 0, size);
+  let mcells = layoutRow(minutes, g, 0, size);
+  const t = g.stroke;
+  let descX = null, ascX = null;
+  if (g.quirk) {
+    descX = stemX(hcells[hcells.length - 1], g, "right"); // hour stem dropping down
+    ascX = stemX(mcells[0], g, "left");                    // minute stem rising up
+    // two extended 1s dissolve the rows into bars; keep only the top one
+    if (hcells[hcells.length - 1].d === 1 && mcells[0].d === 1) ascX = null;
+  }
+  // Pass 2: squeeze each row away from the other's stem. Squeezing only moves
+  // the hour stem right and the minute stem left, so the gaps stay safe.
+  const hx0 = ascX != null ? ascX + t + g.stemGap : 0;
+  const mx1 = descX != null ? descX - g.stemGap : size;
+  hcells = layoutRow(hours, g, hx0, size);
+  mcells = layoutRow(minutes, g, 0, mx1);
+
+  const hLast = hcells[hcells.length - 1];
+  const hColour = hcells.length === 1 ? [cur.tl, prev.tl] : [cur.tr, prev.tr];
   drawDigit(cv, hcells[0].d, hcells[0].x, 0, hcells[0].w, rowH, cur.tl, prev.tl, yCut, g);
   if (hcells[1]) drawDigit(cv, hcells[1].d, hcells[1].x, 0, hcells[1].w, rowH, cur.tr, prev.tr, yCut, g);
-
-  const mcells = layoutRow([Math.floor(mm / 10), mm % 10], size, g);
   drawDigit(cv, mcells[0].d, mcells[0].x, rowH, mcells[0].w, rowH, cur.bl, prev.bl, yCut, g);
   drawDigit(cv, mcells[1].d, mcells[1].x, rowH, mcells[1].w, rowH, cur.br, prev.br, yCut, g);
+
+  // Extensions: continue the stems through the other row.
+  if (descX != null) {
+    const sx = stemX(hLast, g, "right");
+    fillWipe(cv, sx, rowH - g.marginY, t, size - g.marginY - (rowH - g.marginY), hColour[0], hColour[1], yCut);
+  }
+  if (ascX != null) {
+    const sx = stemX(mcells[0], g, "left");
+    fillWipe(cv, sx, g.marginY, t, rowH + g.marginY - g.marginY, cur.bl, prev.bl, yCut);
+  }
   return cv;
 }
 

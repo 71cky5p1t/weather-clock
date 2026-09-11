@@ -30,6 +30,9 @@ struct Config {
   int      pageCount;
 };
 
+// one digit's slot in a clock row
+struct Cell { int d, x, w; };
+
 struct FramePool {
   uint16_t *data;
   int       count;
