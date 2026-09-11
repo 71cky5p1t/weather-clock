@@ -150,11 +150,17 @@ static void fillRectWipe(int x, int y, int w, int h, uint16_t cTop, uint16_t cBo
   }
 }
 
+// Digit geometry — keep in sync with tsv-radar/lib/clock.js GEOMETRY.
+// Chosen from a 100-time contact-sheet review: uniform 6 px stroke, 2 px
+// margins, and a "1" drawn as a single centred bar.
+static const int DIGIT_MARGIN_X = 2;
+static const int DIGIT_MARGIN_Y = 2;
+static const int DIGIT_STROKE   = 6;
+
 static void drawSegmentRects(int x, int y, int w, int h, uint8_t mask, uint16_t cTop, uint16_t cBot, int yCut) {
-  int m = max(2, w / 10);
-  int t = max(3, min(w, h) / 7);
-  int x0 = x + m, x1 = x + w - m;
-  int y0 = y + m, y1 = y + h - m;
+  const int t = DIGIT_STROKE;
+  int x0 = x + DIGIT_MARGIN_X, x1 = x + w - DIGIT_MARGIN_X;
+  int y0 = y + DIGIT_MARGIN_Y, y1 = y + h - DIGIT_MARGIN_Y;
   int mid = (y0 + y1) / 2;
 
   if (mask & (1 << 0)) fillRectWipe(x0, y0,        x1 - x0, t, cTop, cBot, yCut); // A
@@ -175,6 +181,13 @@ static void drawSegmentRects(int x, int y, int w, int h, uint8_t mask, uint16_t 
 
 static void drawDigitInCell(uint8_t d, int cx, int cy, int cw, int ch, uint16_t cTop, uint16_t cBot, int yCut) {
   if (d > 9) d = 0;
+  if (d == 1) {
+    // a lone centred bar reads better than the right-hand 7-seg "1"
+    int x0 = cx + DIGIT_MARGIN_X, x1 = cx + cw - DIGIT_MARGIN_X;
+    int bx = (x0 + x1) / 2 - DIGIT_STROKE / 2;
+    fillRectWipe(bx, cy + DIGIT_MARGIN_Y, DIGIT_STROKE, ch - 2 * DIGIT_MARGIN_Y, cTop, cBot, yCut);
+    return;
+  }
   drawSegmentRects(cx, cy, cw, ch, DIGIT_MASK[d], cTop, cBot, yCut);
 }
 

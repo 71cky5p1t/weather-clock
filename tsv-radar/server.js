@@ -19,6 +19,7 @@ import { content, refreshContent, startContentScheduler, safeName } from "./lib/
 import { message, messageActive, setMessage, clearMessage } from "./lib/text.js";
 import { heartbeat, listDevices } from "./lib/devices.js";
 import { sites as planeSites, startPlanesScheduler } from "./lib/planes.js";
+import { renderClock, renderSheet, sampleTimes, GEOMETRY } from "./lib/clock.js";
 import {
   manifestState,
   loadManifest,
@@ -112,6 +113,32 @@ app.post("/api/device/heartbeat", (req, res) => {
   const rec = heartbeat(id, body, clientIp(req));
   const { manifest } = resolveManifest(id, SIZE);
   res.json({ ok: true, serverTime: Date.now(), manifestRev: manifest.rev, seen: rec.lastSeen });
+});
+
+// ── clock preview (dashboard + tuning) ─────────────────
+const DISPLAY_TZ = process.env.DISPLAY_TZ || "Australia/Brisbane";
+function geometryFromQuery(q) {
+  const g = {};
+  for (const k of Object.keys(GEOMETRY)) if (q[k] !== undefined) g[k] = k === "oneStyle" ? String(q[k]) : Number(q[k]);
+  return g;
+}
+app.get("/api/clock/:time.png", async (req, res) => {
+  let hh, mm, ss;
+  if (req.params.time === "now") {
+    const parts = new Intl.DateTimeFormat("en-GB", { timeZone: DISPLAY_TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(new Date());
+    const get = (t) => Number(parts.find((p) => p.type === t)?.value || 0);
+    hh = get("hour") % 24; mm = get("minute"); ss = get("second");
+  } else {
+    const m = /^(\d{1,2})(\d{2})(\d{2})?$/.exec(req.params.time);
+    if (!m) return res.status(400).send("use HHMM or HHMMSS or now");
+    hh = Number(m[1]) % 24; mm = Number(m[2]) % 60; ss = Number(m[3] || 0) % 60;
+  }
+  const scale = Math.max(1, Math.min(8, Number(req.query.scale) || 1));
+  res.set("Cache-Control", "no-store").type("png").send(await renderClock(hh, mm, ss, SIZE, geometryFromQuery(req.query)).toPng(scale));
+});
+app.get("/api/clock-sheet.png", async (req, res) => {
+  const scale = Math.max(1, Math.min(4, Number(req.query.scale) || 2));
+  res.set("Cache-Control", "no-store").type("png").send(await renderSheet(sampleTimes(), 10, SIZE, 2, geometryFromQuery(req.query)).toPng(scale));
 });
 
 // ── dashboard / admin API ──────────────────────────────

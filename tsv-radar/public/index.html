@@ -72,6 +72,14 @@
   </section>
 
   <section class="card">
+    <h2>Clock <span class="right muted" id="clock-sub">live, display timezone</span></h2>
+    <div class="row">
+      <img id="clock" class="pix" width="192" height="192" alt="clock">
+      <div class="muted" style="max-width:220px">Rendered by the server with the same geometry as the firmware. <a href="/api/clock-sheet.png" target="_blank" style="color:var(--yellow)">Contact sheet of 100 times</a>.</div>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Weather <span class="right" id="weather-sub"></span></h2>
     <div class="row">
       <canvas id="wx" width="192" height="192" class="pix"></canvas>
@@ -355,6 +363,7 @@ $("#config-reload").addEventListener("click", loadConfig);
 load();
 loadConfig();
 setInterval(load, 30000);
+setInterval(() => { $("#clock").src = `/api/clock/now.png?scale=3&t=${Date.now()}`; }, 1000);
 </script>
 </body>
 </html>
