@@ -27,16 +27,33 @@ npm install
 npm run dev          # local, uses ./manifest.json and ./content
 ```
 
-or in Docker (as before):
-
-```bash
-cd tsv-radar
-docker compose up --build -d
-```
-
 Open `http://<server>:8787/` for the dashboard: radar preview, weather cards, device list, message sender and a playlist editor.
 
 Environment (see `.env.example`): `LAT`, `LON`, `LOCATION_NAME` for the weather; `PRODUCT_ID` for the BoM radar (default `IDR1064`, Townsville); `ADMIN_TOKEN` to protect the dashboard's write actions when exposed outside the LAN.
+
+### Deploying on the server (auto-updates from GitHub)
+
+One-time setup on the box that runs Docker:
+
+```bash
+git clone https://github.com/71cky5p1t/weather-clock.git /opt/weather-clock
+cd /opt/weather-clock/tsv-radar
+cp .env.example .env      # fill in CF_TUNNEL_TOKEN, TSV_RADAR_HOST, GITHUB_WEBHOOK_SECRET
+docker compose up --build -d
+```
+
+`REPO_DIR` in `.env` must match where you cloned it (default `/opt/weather-clock`).
+
+Then in GitHub → repo **Settings → Webhooks → Add webhook**:
+
+- Payload URL: `https://<TSV_RADAR_HOST>/hooks/deploy`
+- Content type: `application/json`
+- Secret: the same value as `GITHUB_WEBHOOK_SECRET`
+- Events: *Just the push event*
+
+Every push to `main` now hits the `deployer` sidecar, which verifies the HMAC signature, fast-forwards the checkout and rebuilds the `tsv-radar` container. GitHub's webhook page shows each delivery and the response, and `docker logs tsv-radar-deployer` shows the build output. If the tunnel is ever down, `deploy.sh` also works from cron as a fallback (see the header of that file).
+
+The deployer and cloudflared containers themselves are not rebuilt by the hook. If you change them, run `docker compose up -d --build` once by hand.
 
 ### Playlist (`manifest.json`)
 

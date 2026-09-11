@@ -34,6 +34,31 @@ services:
       - saltbox_proxy
     restart: unless-stopped
 
+  # Receives GitHub push webhooks at https://<host>/hooks/deploy and runs deploy.sh.
+  # Needs the repo mounted at the SAME path as on the host so `docker compose`
+  # inside the container resolves bind mounts correctly.
+  deployer:
+    build: ./deployer
+    container_name: tsv-radar-deployer
+    environment:
+      - REPO_DIR=${REPO_DIR:-/opt/weather-clock}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?set GITHUB_WEBHOOK_SECRET in .env}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REPO_DIR:-/opt/weather-clock}:${REPO_DIR:-/opt/weather-clock}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.tsv-radar-hooks.rule=Host(`${TSV_RADAR_HOST}`) && PathPrefix(`/hooks/`)
+      - traefik.http.routers.tsv-radar-hooks.priority=100
+      - traefik.http.routers.tsv-radar-hooks.entrypoints=websecure
+      - traefik.http.routers.tsv-radar-hooks.tls=true
+      - traefik.http.routers.tsv-radar-hooks.tls.options=securetls@file
+      - traefik.http.services.tsv-radar-hooks.loadbalancer.server.port=9000
+      - traefik.docker.network=${TRAEFIK_DOCKER_NETWORK:-traefik_proxy}
+    networks:
+      - saltbox_proxy
+    restart: unless-stopped
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
