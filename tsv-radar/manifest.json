@@ -18,9 +18,11 @@
   "pages": [
     { "type": "RADAR", "loops": 5, "frameDelayMs": 450 },
     { "type": "CLOCK", "durationMs": 10000 },
-    { "type": "WEATHER", "durationMs": 10000 },
+    { "type": "WEATHER", "durationMs": 8000 },
     { "type": "CLOCK", "durationMs": 10000 },
-    { "type": "QUOTE", "durationMs": 7000 }
+    { "type": "PLANES", "durationMs": 9000 },
+    { "type": "QUOTE", "durationMs": 7000 },
+    { "type": "FORECAST", "durationMs": 8000, "enabled": false }
   ],
   "devices": {
     "example-kitchen": {

@@ -18,6 +18,7 @@ import { weather, refreshWeather, startWeatherScheduler } from "./lib/weather.js
 import { content, refreshContent, startContentScheduler, safeName } from "./lib/content.js";
 import { message, messageActive, setMessage, clearMessage } from "./lib/text.js";
 import { heartbeat, listDevices } from "./lib/devices.js";
+import { sites as planeSites, startPlanesScheduler } from "./lib/planes.js";
 import {
   manifestState,
   loadManifest,
@@ -62,6 +63,7 @@ loadManifest(true);
 startRadarScheduler(SIZE, REFRESH_SECONDS);
 startWeatherScheduler(SIZE);
 startContentScheduler(SIZE);
+startPlanesScheduler(SIZE);
 setInterval(() => loadManifest(), 15 * 1000);
 
 // ── firmware-facing API ────────────────────────────────
@@ -137,6 +139,19 @@ app.get("/api/status", (req, res) => {
       count: weather.frames.length,
       data: weather.data,
     },
+    planes: Array.from(planeSites.values()).map((s) => ({
+      name: s.name,
+      label: s.label,
+      lat: s.lat,
+      lon: s.lon,
+      radiusNm: s.radiusNm,
+      updatedAt: s.updatedAt,
+      lastError: s.lastError,
+      count: s.frames.length,
+      airborne: s.data?.airborne ?? 0,
+      total: s.data?.count ?? 0,
+      nearest: (s.data?.planes || []).slice(0, 3).map((p) => ({ callsign: p.callsign, type: p.type, altFt: p.altFt, distKm: Math.round(p.distKm), onGround: p.onGround })),
+    })),
     content: Array.from(content.assets.values()).map((a) => ({
       name: a.name,
       sourceFile: a.sourceFile,

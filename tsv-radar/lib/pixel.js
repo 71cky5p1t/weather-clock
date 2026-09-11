@@ -219,6 +219,54 @@ export class Canvas {
     this.rect(x, y, 1, h, rgb);
   }
 
+  circle(cx, cy, r, rgb) {
+    // midpoint circle
+    let x = r, y = 0, err = 1 - r;
+    while (x >= y) {
+      this.set(cx + x, cy + y, rgb); this.set(cx + y, cy + x, rgb);
+      this.set(cx - y, cy + x, rgb); this.set(cx - x, cy + y, rgb);
+      this.set(cx - x, cy - y, rgb); this.set(cx - y, cy - x, rgb);
+      this.set(cx + y, cy - x, rgb); this.set(cx + x, cy - y, rgb);
+      y++;
+      if (err < 0) err += 2 * y + 1;
+      else { x--; err += 2 * (y - x) + 1; }
+    }
+  }
+
+  line(x0, y0, x1, y1, rgb) {
+    x0 |= 0; y0 |= 0; x1 |= 0; y1 |= 0;
+    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      this.set(x0, y0, rgb);
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  // 7-segment digit in a w×h cell — same geometry as the firmware's clock.
+  sevenSeg(x, y, w, h, digit, rgb) {
+    const MASK = [0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111];
+    const mask = digit === "-" ? 0b1000000 : MASK[Number(digit)] ?? 0;
+    const m = Math.max(1, Math.floor(w / 10));
+    const t = Math.max(2, Math.floor(Math.min(w, h) / 7));
+    const x0 = x + m, x1 = x + w - m, y0 = y + m, y1 = y + h - m;
+    const mid = Math.floor((y0 + y1) / 2);
+    const gOn = (mask & (1 << 6)) !== 0;
+    const halfTop = Math.max(0, gOn ? mid - y0 - Math.floor(t / 2) : mid - y0);
+    const halfBot = Math.max(0, gOn ? y1 - (mid + Math.floor(t / 2)) : y1 - mid);
+    if (mask & (1 << 0)) this.rect(x0, y0, x1 - x0, t, rgb);                              // A
+    if (mask & (1 << 6)) this.rect(x0, mid - Math.floor(t / 2), x1 - x0, t, rgb);         // G
+    if (mask & (1 << 3)) this.rect(x0, y1 - t, x1 - x0, t, rgb);                          // D
+    if (mask & (1 << 5)) this.rect(x0, y0, t, halfTop, rgb);                              // F
+    if (mask & (1 << 4)) this.rect(x0, mid, t, halfBot, rgb);                             // E
+    if (mask & (1 << 1)) this.rect(x1 - t, y0, t, halfTop, rgb);                          // B
+    if (mask & (1 << 2)) this.rect(x1 - t, mid, t, halfBot, rgb);                         // C
+  }
+
   // ── text ──
   static measure(text, { font = "5x7", scale = 1, spacing = 1 } = {}) {
     const glyphW = font === "3x5" ? 3 : 5;

@@ -74,11 +74,17 @@
   <section class="card">
     <h2>Weather <span class="right" id="weather-sub"></span></h2>
     <div class="row">
-      <img id="wx0" class="pix" width="192" height="192" alt="current">
-      <img id="wx1" class="pix" width="192" height="192" alt="forecast">
+      <img id="wx0" class="pix" width="192" height="192" alt="today">
+      <img id="wx1" class="pix" width="192" height="192" alt="forecast" title="FORECAST page (3-day)">
     </div>
     <dl class="stat" id="weather-stats" style="margin-top:10px"></dl>
     <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/refresh-weather">Fetch now</button></p>
+  </section>
+
+  <section class="card">
+    <h2>Planes overhead <span class="right muted" id="planes-sub"></span></h2>
+    <div class="row" id="planes"></div>
+    <dl class="stat" id="planes-stats" style="margin-top:10px"></dl>
   </section>
 
   <section class="card">
@@ -141,7 +147,7 @@
       <span class="msg" id="config-msg"></span>
     </div>
     <p class="muted" style="margin:10px 0 0">
-      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (durationMs) ·
+      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>FORECAST</code> (3-day) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
       <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>
@@ -213,8 +219,8 @@ function render() {
   // weather
   const w = s.weather;
   $("#wx0").src = w.count ? `/api/bitmap/weather/0.png?scale=3${bust}` : "";
-  $("#wx1").src = w.count > 1 ? `/api/bitmap/weather/1.png?scale=3${bust}` : "";
-  $("#wx1").hidden = w.count < 2;
+  $("#wx1").src = w.count ? `/api/bitmap/forecast/0.png?scale=3${bust}` : "";
+  $("#wx1").hidden = !w.count;
   const d = w.data;
   $("#weather-sub").textContent = d ? d.location : "";
   $("#weather-stats").innerHTML = d
@@ -225,6 +231,16 @@ function render() {
         ["Updated", ago(w.updatedAt) + (w.lastError ? ` · <span class="bad">${esc(w.lastError)}</span>` : "")],
       ])
     : dl([["Status", esc(w.lastError || "waiting for first fetch"), "bad"]]);
+
+  // planes
+  const ps = s.planes || [];
+  $("#planes-sub").textContent = ps.map((p) => `${p.label} ${p.airborne} airborne / ${p.total} total`).join(" · ");
+  $("#planes").innerHTML = ps.map((p) => Array.from({ length: p.count }, (_, i) =>
+    `<img class="pix" width="128" height="128" src="/api/bitmap/${esc(p.name)}/${i}.png?scale=2${bust}" title="${esc(p.label)}">`).join("")).join("");
+  $("#planes-stats").innerHTML = ps.length ? dl(ps.flatMap((p) => [
+    [p.label, `${p.lat.toFixed(2)}, ${p.lon.toFixed(2)} · ${p.radiusNm} nm · ${ago(p.updatedAt)}` + (p.lastError ? ` · <span class="bad">${esc(p.lastError)}</span>` : "")],
+    ...p.nearest.map((n) => ["", `${esc(n.callsign)} ${esc(n.type)} · ${n.onGround ? "on ground" : (n.altFt ?? "?") + " ft"} · ${n.distKm} km`]),
+  ])) : dl([["Status", "waiting for first fetch"]]);
 
   // message
   const m = s.message;

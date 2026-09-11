@@ -13,7 +13,9 @@ export const weather = {
   updatedAt: 0,
   lastError: null,
   data: null, // normalised summary
-  frames: [], // RGB565 buffers
+  frames: [], // today card
+  forecastFrames: [], // 3-day card
+  detailFrames: [], // dense current-conditions card
   refreshing: false,
 };
 
@@ -164,6 +166,58 @@ export function renderCurrentCard(d, size = 64) {
   return cv;
 }
 
+
+// Single "today" card in the clock's Mondrian language: 7-seg temperature,
+// icon, and three solid blocks (hi / lo / rain) with black text.
+export function renderTodayCard(d, size = 64) {
+  const cv = new Canvas(size, size);
+  const today = d.days[0] || {};
+
+  // header: weekday + date
+  const dateStr = d.time
+    ? new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: TZ })
+        .formatToParts(new Date(d.time))
+        .map((p) => (p.type === "month" || p.type === "weekday" ? p.value.slice(0, 3) : p.type === "literal" ? " " : p.value))
+        .join("").replace(/\s+/g, " ").trim().toUpperCase()
+    : d.location;
+  cv.textCentered(1, dateStr.slice(0, 15), C.grey, { font: "3x5" });
+  cv.hline(0, 7, size, C.dim);
+
+  // big 7-seg temperature
+  const t = d.temp == null ? null : Math.round(d.temp);
+  const tc = tempColour(d.temp);
+  const digits = t == null ? "--" : String(Math.abs(t));
+  const dw = 14, dh = 22, gap = 2, y0 = 10;
+  const totalW = digits.length * dw + (digits.length - 1) * gap + 5;
+  let x = Math.max(1, Math.floor((42 - totalW) / 2));
+  if (t != null && t < 0) { cv.rect(x, y0 + Math.floor(dh / 2) - 1, 5, 2, tc); x += 6; }
+  for (const ch of digits) {
+    cv.sevenSeg(x, y0, dw, dh, ch === "-" ? "-" : ch, tc);
+    x += dw + gap;
+  }
+  cv.circle(x + 1, y0 + 2, 1, tc); // degree ring
+
+  // icon
+  drawIcon(cv, d.icon, 46, 12, 16);
+
+  // condition
+  cv.textCentered(35, d.label.toUpperCase().slice(0, 15), C.white, { font: "3x5" });
+
+  // three Mondrian blocks
+  const blocks = [
+    { x: 1, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
+    { x: 22, colour: C.blue, label: "LO", value: `${fmtTemp(today.lo)}°` },
+    { x: 43, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
+  ];
+  for (const b of blocks) {
+    cv.rect(b.x, 43, 20, 20, b.colour);
+    const ink = C.black;
+    cv.text(b.x + Math.floor((20 - Canvas.measure(b.label, { font: "3x5" })) / 2), 45, b.label, ink, { font: "3x5" });
+    cv.text(b.x + Math.floor((20 - Canvas.measure(b.value)) / 2), 52, b.value, ink);
+  }
+  return cv;
+}
+
 export function renderForecastCard(d, size = 64) {
   const cv = new Canvas(size, size);
   cv.textCentered(1, "FORECAST", C.grey, { font: "3x5" });
@@ -228,7 +282,9 @@ export async function refreshWeather(size = 64) {
     const raw = await res.json();
     const d = normalise(raw);
     weather.data = d;
-    weather.frames = [renderCurrentCard(d, size).toRgb565BE(), renderForecastCard(d, size).toRgb565BE()];
+    weather.frames = [renderTodayCard(d, size).toRgb565BE()];
+    weather.forecastFrames = [renderForecastCard(d, size).toRgb565BE()];
+    weather.detailFrames = [renderCurrentCard(d, size).toRgb565BE()];
     weather.updatedAt = Date.now();
     weather.lastError = null;
   } catch (err) {

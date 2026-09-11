@@ -9,6 +9,7 @@ import { radar } from "./radar.js";
 import { weather } from "./weather.js";
 import { content, safeName } from "./content.js";
 import { renderTextCard, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
+import { sites as planeSites, ensureSite } from "./planes.js";
 
 const MANIFEST_PATH = process.env.MANIFEST_PATH || "/mnt/data/manifest.json";
 
@@ -25,8 +26,9 @@ export const DEFAULT_MANIFEST = {
   pages: [
     { type: "RADAR", loops: 5, frameDelayMs: 450 },
     { type: "CLOCK", durationMs: 10000 },
-    { type: "WEATHER", durationMs: 10000 },
+    { type: "WEATHER", durationMs: 8000 },
     { type: "CLOCK", durationMs: 10000 },
+    { type: "PLANES", durationMs: 9000 },
     { type: "QUOTE", durationMs: 7000 },
   ],
   devices: {},
@@ -137,7 +139,19 @@ export function getBitmap(name, size = 64, deviceId = "default") {
     return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt };
   }
   if (n === "weather") {
-    return { name: n, frames: weather.frames, frameDelayMs: 5000, updatedAt: weather.updatedAt };
+    return { name: n, frames: weather.frames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
+  }
+  if (n === "forecast") {
+    return { name: n, frames: weather.forecastFrames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
+  }
+  if (n === "weather-detail") {
+    return { name: n, frames: weather.detailFrames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
+  }
+  if (n.startsWith("planes")) {
+    const site = planeSites.get(n);
+    if (!site) return null;
+    site.lastUsed = Date.now();
+    return { name: n, frames: site.frames, frameDelayMs: 3000, updatedAt: site.updatedAt, text: site.data ? `${site.data.airborne} airborne` : "" };
   }
   if (n === "quote") {
     const q = pickQuote(d.quotes, d.quoteRotateMinutes * 60 * 1000);
@@ -194,14 +208,24 @@ export function resolveManifest(deviceId = "default", size = 64) {
       pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450) });
       continue;
     }
-    if (t === "WEATHER") {
-      const count = weather.frames.length;
-      if (!count) {
+    if (t === "WEATHER" || t === "FORECAST" || t === "WEATHER-DETAIL") {
+      const name = t.toLowerCase();
+      const frames = name === "weather" ? weather.frames : name === "forecast" ? weather.forecastFrames : weather.detailFrames;
+      if (!frames.length) {
         skipped.push({ type: t, reason: "no weather data yet" });
         continue;
       }
-      const durationMs = posInt(p.durationMs, 10000);
-      pages.push({ type: "BITMAP", name: "weather", loops: 1, frameDelayMs: Math.max(1500, Math.round(durationMs / count)) });
+      pages.push({ type: "BITMAP", name, loops: 1, frameDelayMs: posInt(p.durationMs, 8000) });
+      continue;
+    }
+    if (t === "PLANES") {
+      const site = ensureSite({ lat: p.lat, lon: p.lon, radiusNm: p.radiusNm, label: p.label });
+      if (!site.frames.length) {
+        skipped.push({ type: t, reason: "no aircraft data yet" });
+        continue;
+      }
+      const durationMs = posInt(p.durationMs, 9000);
+      pages.push({ type: "BITMAP", name: site.name, loops: 1, frameDelayMs: Math.max(2000, Math.round(durationMs / site.frames.length)) });
       continue;
     }
     if (t === "QUOTE") {
