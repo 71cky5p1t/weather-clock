@@ -117,14 +117,8 @@ export function renderTodayCard(d, size = 64, phase = 0) {
   const cv = new Canvas(size, size);
   const today = d.days[0] || {};
 
-  // header: weekday + date
-  const dateStr = d.time
-    ? new Intl.DateTimeFormat("en-AU", { weekday: "short", day: "numeric", month: "short", timeZone: TZ })
-        .formatToParts(new Date(d.time))
-        .map((p) => (p.type === "month" || p.type === "weekday" ? p.value.slice(0, 3) : p.type === "literal" ? " " : p.value))
-        .join("").replace(/\s+/g, " ").trim().toUpperCase()
-    : d.location;
-  cv.textCentered(1, dateStr.slice(0, 15), C.grey, { font: "3x5" });
+  // header: condition (the date has its own page)
+  cv.textCentered(1, d.label.toUpperCase().slice(0, 15), C.white, { font: "3x5" });
   cv.hline(0, 7, size, C.dim);
 
   // big 7-seg temperature
@@ -144,21 +138,22 @@ export function renderTodayCard(d, size = 64, phase = 0) {
   // icon
   drawIcon(cv, d.icon, 46, 12, 16, phase);
 
-  // condition
-  cv.textCentered(35, d.label.toUpperCase().slice(0, 15), C.white, { font: "3x5" });
-
-  // three Mondrian blocks
-  const blocks = [
-    { x: 1, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
-    { x: 22, colour: C.blue, label: "LO", value: `${fmtTemp(today.lo)}°` },
-    { x: 43, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
+  // three columns: LO | RAIN | HI. Coloured accent bar + coloured text on
+  // black (solid blocks with black text were hard to read on the panel).
+  const cols = [
+    { x: 0, colour: C.sky, label: "LO", value: `${fmtTemp(today.lo)}°` },
+    { x: 21, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
+    { x: 43, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
   ];
-  for (const b of blocks) {
-    cv.rect(b.x, 43, 20, 20, b.colour);
-    const ink = C.black;
-    cv.text(b.x + Math.floor((20 - Canvas.measure(b.label, { font: "3x5" })) / 2), 45, b.label, ink, { font: "3x5" });
-    cv.text(b.x + Math.floor((20 - Canvas.measure(b.value)) / 2), 52, b.value, ink);
+  cv.hline(0, 38, size, C.dim);
+  for (const c of cols) {
+    const w = 21;
+    cv.rect(c.x + 2, 42, w - 4, 2, c.colour);
+    cv.text(c.x + Math.floor((w - Canvas.measure(c.label, { font: "3x5" })) / 2), 47, c.label, C.grey, { font: "3x5" });
+    cv.text(c.x + Math.floor((w - Canvas.measure(c.value)) / 2), 55, c.value, c.colour);
   }
+  cv.vline(21, 42, 21, C.dim);
+  cv.vline(42, 42, 21, C.dim);
   return cv;
 }
 

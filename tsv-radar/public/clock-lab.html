@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock Lab</title>
+<style>
+  :root { --bg:#0d0f14; --panel:#161a23; --line:#262c3a; --text:#e6e8ee; --muted:#8b93a7; --yellow:#ffdd00; --blue:#2f7bff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 20px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0; }
+  header a { color:var(--muted); text-decoration:none; }
+  main { display:grid; grid-template-columns: minmax(300px, 560px) 1fr; gap:16px; padding:16px 20px; max-width:1500px; margin:0 auto; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0; }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin:0 0 10px; display:flex; gap:8px; align-items:center; }
+  .card h2 .right { margin-left:auto; text-transform:none; letter-spacing:0; font-weight:normal; }
+  canvas.big { width:100%; max-width:512px; aspect-ratio:1; display:block; background:#000; border-radius:6px; image-rendering:pixelated; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button, input, select { font:inherit; }
+  button { background:#222838; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button.primary { background:var(--blue); border-color:var(--blue); color:#fff; }
+  button.on { border-color:var(--yellow); color:var(--yellow); }
+  input[type=text], input[type=number], select { background:#0c0e13; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 9px; }
+  input[type=range] { width:100%; }
+  .time { font: 600 28px ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing:2px; }
+  .knobs { display:grid; grid-template-columns: auto 1fr auto; gap:6px 10px; align-items:center; font-size:13px; }
+  .knobs label { color:var(--muted); }
+  .knobs output { min-width:2.5em; text-align:right; font-variant-numeric: tabular-nums; }
+  .gallery { display:grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap:8px; }
+  .tile { cursor:pointer; text-align:center; font-size:11px; color:var(--muted); }
+  .tile canvas { width:100%; aspect-ratio:1; display:block; background:#000; border-radius:4px; border:1px solid var(--line); image-rendering:pixelated; }
+  .tile.sel canvas { border-color:var(--yellow); }
+  .strip { display:grid; grid-template-columns: repeat(8, 1fr); gap:6px; }
+  .strip canvas { width:100%; aspect-ratio:1; background:#000; border-radius:4px; border:1px solid var(--line); image-rendering:pixelated; }
+  .strip div { text-align:center; font-size:11px; color:var(--muted); }
+  code, pre { background:#0c0e13; border-radius:6px; font-size:12px; }
+  pre { padding:8px 10px; overflow:auto; margin:0; }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Clock Lab</h1>
+  <span class="muted">jump to any time, watch the tick-over, tweak the geometry</span>
+  <span style="flex:1"></span>
+  <a href="/">← dashboard</a>
+</header>
+<main>
+  <div style="display:grid; gap:16px; align-content:start">
+    <section class="card">
+      <h2>Display <span class="right"><label><input type="checkbox" id="led" checked> LED look</label></span></h2>
+      <canvas id="big" class="big" width="512" height="512"></canvas>
+      <div class="row" style="margin-top:12px; justify-content:space-between">
+        <div class="time" id="timeText">00:00:00</div>
+        <div class="row">
+          <button id="now">Now</button>
+          <button id="play" class="primary">Play</button>
+          <select id="speed"><option value="1">1×</option><option value="10">10×</option><option value="60" selected>60×</option><option value="600">600×</option></select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="timeInput" placeholder="HH:MM:SS" size="9">
+        <button id="go">Jump</button>
+        <button id="prevMin">− minute</button>
+        <button id="nextMin">+ minute</button>
+        <button id="tick" title="jump to :57 and play the tick-over at 1×">Watch tick-over</button>
+        <button id="rand">Random</button>
+      </div>
+      <div class="knobs" style="margin-top:10px">
+        <label>Hour</label><input type="range" id="hh" min="0" max="23" value="14"><output id="hhO">14</output>
+        <label>Minute</label><input type="range" id="mm" min="0" max="59" value="41"><output id="mmO">41</output>
+        <label>Second</label><input type="range" id="ss" min="0" max="59" value="7"><output id="ssO">07</output>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Geometry <span class="right"><button id="reset" style="padding:2px 8px;font-size:12px">reset</button></span></h2>
+      <div class="knobs">
+        <label>Stroke</label><input type="range" id="stroke" min="2" max="10" value="6"><output id="strokeO">6</output>
+        <label>"1" width</label><input type="range" id="weightNarrow" min="15" max="100" value="40"><output id="weightNarrowO">40</output>
+        <label>Margin X</label><input type="range" id="marginX" min="0" max="6" value="2"><output id="marginXO">2</output>
+        <label>Margin Y</label><input type="range" id="marginY" min="0" max="6" value="2"><output id="marginYO">2</output>
+        <label>Stem gap</label><input type="range" id="stemGap" min="0" max="8" value="3"><output id="stemGapO">3</output>
+        <label>Tick morph</label><input type="range" id="morphMs" min="0" max="1500" step="50" value="500"><output id="morphMsO">500</output>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="quirk" class="on">Interlocking stems</button>
+        <button id="leadingZero">Leading zero</button>
+        <button id="oneStyle">Centred 1s</button>
+      </div>
+      <pre id="geomOut" style="margin-top:10px"></pre>
+      <p class="muted" style="margin:8px 0 0; font-size:12px">These are the same constants as <code>DIGIT_STROKE</code>, <code>DIGIT_MARGIN_X/Y</code>, <code>STEM_GAP</code> and <code>digitWeight()</code> in the firmware.</p>
+    </section>
+  </div>
+
+  <div style="display:grid; gap:16px; align-content:start">
+    <section class="card">
+      <h2>Tick-over <span class="right" id="stripLabel"></span></h2>
+      <div class="strip" id="strip"></div>
+      <p class="muted" style="margin:8px 0 0; font-size:12px">The last second of the minute, the morph in five steps, then the first second of the next minute. Colours shift through the seconds wipe, shapes re-flow through the morph.</p>
+    </section>
+
+    <section class="card">
+      <h2>Gallery <span class="right muted" id="galleryCount"></span></h2>
+      <div class="tabs">
+        <button data-set="quirk" class="on">Interlocking cases</button>
+        <button data-set="sample">100 sample times</button>
+        <button data-set="hours">Every hour at :41</button>
+        <button data-set="minutes">14:00 → 14:59</button>
+        <button data-set="ones">Lots of 1s</button>
+      </div>
+      <div class="gallery" id="gallery"></div>
+    </section>
+  </div>
+</main>
+
+<script type="module">
+import { GEOMETRY, drawClock, sampleTimes, quirkTimes, buildMorph, easeInOut } from "/lib/clock-core.js";
+
+const SIZE = 64;
+const $ = (s) => document.querySelector(s);
+
+// ── tiny pixel surface ──
+class Surface {
+  constructor(size) { this.size = size; this.px = new Array(size * size).fill(null); }
+  rect(x, y, w, h, rgb) {
+    for (let yy = Math.max(0, y); yy < Math.min(this.size, y + h); yy++)
+      for (let xx = Math.max(0, x); xx < Math.min(this.size, x + w); xx++) this.px[yy * this.size + xx] = rgb;
+  }
+}
+function render(hh, mm, ss, g = geom) { const s = new Surface(SIZE); drawClock(s, hh, mm, ss, SIZE, g); return s.px; }
+
+function paint(canvas, px, led = $("#led").checked) {
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, cell = W / SIZE;
+  ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, W);
+  for (let i = 0; i < px.length; i++) {
+    const p = px[i]; if (!p || !(p[0] | p[1] | p[2])) continue;
+    const x = (i % SIZE) * cell, y = Math.floor(i / SIZE) * cell;
+    ctx.fillStyle = `rgb(${p[0]},${p[1]},${p[2]})`;
+    if (led && cell >= 4) { ctx.beginPath(); ctx.arc(x + cell / 2, y + cell / 2, cell * 0.38, 0, Math.PI * 2); ctx.fill(); }
+    else ctx.fillRect(x, y, cell, cell);
+  }
+}
+
+// ── state ──
+let geom = { ...GEOMETRY };
+let t = 14 * 3600 + 41 * 60 + 7;      // seconds of day (float)
+let playing = false, speed = 60, last = performance.now();
+let morph = null, morphStart = 0, morphFrom = null, morphTo = null;
+let shown = null;                      // last painted pixel array
+const pad = (n) => String(n).padStart(2, "0");
+const hms = (sec) => { sec = ((sec % 86400) + 86400) % 86400; return [Math.floor(sec / 3600), Math.floor(sec / 60) % 60, Math.floor(sec) % 60]; };
+
+function setTime(sec, { silent } = {}) {
+  const prevMin = Math.floor(t / 60);
+  t = ((sec % 86400) + 86400) % 86400;
+  const [hh, mm, ss] = hms(t);
+  if (!silent && geom.morphMs > 0 && shown && Math.floor(t / 60) !== prevMin && Math.abs(Math.floor(t / 60) - prevMin) === 1) {
+    morphFrom = shown; morphTo = render(hh, mm, ss); morph = buildMorph(morphFrom, morphTo, SIZE); morphStart = performance.now();
+  } else { morph = null; }
+  $("#timeText").textContent = `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
+  $("#hh").value = hh; $("#mm").value = mm; $("#ss").value = ss;
+  $("#hhO").textContent = pad(hh); $("#mmO").textContent = pad(mm); $("#ssO").textContent = pad(ss);
+  if (!morph) draw();
+  updateStrip();
+}
+
+function draw() {
+  const [hh, mm, ss] = hms(t);
+  shown = render(hh, mm, ss);
+  paint($("#big"), shown);
+}
+
+function frame(now) {
+  const dt = (now - last) / 1000; last = now;
+  if (morph) {
+    const e = Math.min(1, (now - morphStart) / geom.morphMs);
+    const px = new Array(SIZE * SIZE).fill(null);
+    for (const [x, y, r, g, b] of morph(easeInOut(e))) if (x >= 0 && y >= 0 && x < SIZE && y < SIZE) px[y * SIZE + x] = [r, g, b];
+    paint($("#big"), px);
+    if (e >= 1) { morph = null; shown = morphTo; paint($("#big"), shown); }
+  } else if (playing) {
+    setTime(t + dt * speed);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ── tick-over strip ──
+function updateStrip() {
+  const [hh, mm] = hms(t);
+  const next = hms(t - (t % 60) + 60);
+  const a = render(hh, mm, 59), b = render(next[0], next[1], 0);
+  const m = buildMorph(a, b, SIZE);
+  const strip = $("#strip"); strip.innerHTML = "";
+  const frames = [[a, `${pad(hh)}:${pad(mm)}:59`]];
+  for (const e of [0.2, 0.4, 0.5, 0.6, 0.8]) {
+    const px = new Array(SIZE * SIZE).fill(null);
+    if (m) for (const [x, y, r, g, bb] of m(easeInOut(e))) if (x >= 0 && y >= 0 && x < SIZE && y < SIZE) px[y * SIZE + x] = [r, g, bb];
+    frames.push([px, `${Math.round(e * 100)}%`]);
+  }
+  frames.push([b, `${pad(next[0])}:${pad(next[1])}:00`]);
+  frames.push([render(next[0], next[1], 30), `${pad(next[0])}:${pad(next[1])}:30`]);
+  for (const [px, label] of frames) {
+    const d = document.createElement("div"); const c = document.createElement("canvas"); c.width = c.height = 128;
+    paint(c, px, false); d.appendChild(c); d.appendChild(document.createTextNode(label)); strip.appendChild(d);
+  }
+  $("#stripLabel").textContent = `${pad(hh)}:${pad(mm)} → ${pad(next[0])}:${pad(next[1])}`;
+}
+
+// ── gallery ──
+const SETS = {
+  quirk: () => quirkTimes(),
+  sample: () => sampleTimes(),
+  hours: () => Array.from({ length: 24 }, (_, h) => [h, 41, (h * 7) % 60]),
+  minutes: () => Array.from({ length: 60 }, (_, m) => [14, m, (m * 11) % 60]),
+  ones: () => [[1,1,1],[1,10,10],[1,11,11],[10,1,20],[10,10,30],[10,11,40],[11,1,50],[11,10,5],[11,11,15],[11,14,25],[11,41,35],[12,11,45],[13,11,55],[14,11,8],[17,11,18],[21,1,28],[21,10,38],[21,11,48],[21,14,58],[1,14,3],[1,41,13],[1,17,23],[11,17,33],[21,17,43]],
+};
+let currentSet = "quirk";
+function buildGallery() {
+  const times = SETS[currentSet]();
+  const gal = $("#gallery"); gal.innerHTML = "";
+  $("#galleryCount").textContent = `${times.length} times · click to jump`;
+  for (const [hh, mm, ss] of times) {
+    const d = document.createElement("div"); d.className = "tile";
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    paint(c, render(hh, mm, ss), false);
+    d.appendChild(c); d.appendChild(document.createTextNode(`${pad(hh)}:${pad(mm)}:${pad(ss)}`));
+    d.addEventListener("click", () => { playing = false; $("#play").textContent = "Play"; setTime(hh * 3600 + mm * 60 + ss, { silent: true }); });
+    gal.appendChild(d);
+  }
+}
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".tabs button").forEach((x) => x.classList.remove("on")); b.classList.add("on");
+  currentSet = b.dataset.set; buildGallery();
+}));
+
+// ── controls ──
+$("#play").addEventListener("click", () => { playing = !playing; $("#play").textContent = playing ? "Pause" : "Play"; last = performance.now(); });
+$("#speed").addEventListener("change", (e) => { speed = Number(e.target.value); });
+$("#now").addEventListener("click", () => { const d = new Date(); setTime(d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds(), { silent: true }); });
+$("#go").addEventListener("click", () => { const m = /^(\d{1,2}):?(\d{2}):?(\d{2})?$/.exec($("#timeInput").value.trim()); if (m) setTime(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0), { silent: true }); });
+$("#timeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#go").click(); });
+$("#prevMin").addEventListener("click", () => setTime(t - 60, { silent: true }));
+$("#nextMin").addEventListener("click", () => setTime(t - (t % 60) + 60));
+$("#tick").addEventListener("click", () => { setTime(t - (t % 60) + 57, { silent: true }); speed = 1; $("#speed").value = "1"; playing = true; $("#play").textContent = "Pause"; last = performance.now(); });
+$("#rand").addEventListener("click", () => setTime(Math.floor(Math.random() * 86400), { silent: true }));
+for (const id of ["hh", "mm", "ss"]) $("#" + id).addEventListener("input", () => setTime(Number($("#hh").value) * 3600 + Number($("#mm").value) * 60 + Number($("#ss").value), { silent: true }));
+$("#led").addEventListener("change", draw);
+
+// geometry knobs
+geom.morphMs = 500;
+for (const id of ["stroke", "weightNarrow", "marginX", "marginY", "stemGap", "morphMs"]) {
+  $("#" + id).addEventListener("input", (e) => { geom[id] = Number(e.target.value); $("#" + id + "O").textContent = e.target.value; refreshAll(); });
+}
+$("#quirk").addEventListener("click", (e) => { geom.quirk = geom.quirk ? 0 : 1; e.target.classList.toggle("on", !!geom.quirk); refreshAll(); });
+$("#leadingZero").addEventListener("click", (e) => { geom.leadingZero = geom.leadingZero ? 0 : 1; e.target.classList.toggle("on", !!geom.leadingZero); refreshAll(); });
+$("#oneStyle").addEventListener("click", (e) => { geom.oneStyle = geom.oneStyle === "centered" ? "seg" : "centered"; e.target.classList.toggle("on", geom.oneStyle === "centered"); refreshAll(); });
+$("#oneStyle").classList.add("on");
+$("#reset").addEventListener("click", () => {
+  geom = { ...GEOMETRY, morphMs: 500 };
+  for (const id of ["stroke", "weightNarrow", "marginX", "marginY", "stemGap", "morphMs"]) { $("#" + id).value = geom[id]; $("#" + id + "O").textContent = geom[id]; }
+  $("#quirk").classList.toggle("on", !!geom.quirk); $("#leadingZero").classList.toggle("on", !!geom.leadingZero); $("#oneStyle").classList.toggle("on", geom.oneStyle === "centered");
+  refreshAll();
+});
+function refreshAll() {
+  const { morphMs, ...g } = geom;
+  $("#geomOut").textContent = JSON.stringify(g, null, 1).replace(/\n\s*/g, " ");
+  draw(); updateStrip(); buildGallery();
+}
+
+refreshAll();
+setTime(t, { silent: true });
+</script>
+</body>
+</html>

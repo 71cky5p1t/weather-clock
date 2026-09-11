@@ -20,6 +20,7 @@
     { "type": "CLOCK", "durationMs": 10000 },
     { "type": "WEATHER", "durationMs": 8000 },
     { "type": "CLOCK", "durationMs": 10000 },
+    { "type": "DATE", "durationMs": 6000 },
     { "type": "PLANES", "durationMs": 9000 },
     { "type": "QUOTE", "durationMs": 7000 }
   ],

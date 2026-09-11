@@ -10,6 +10,7 @@ import { weather } from "./weather.js";
 import { content, safeName } from "./content.js";
 import { renderTextCard, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
 import { sites as planeSites, ensureSite } from "./planes.js";
+import { dateFrames } from "./date.js";
 
 const MANIFEST_PATH = process.env.MANIFEST_PATH || "/mnt/data/manifest.json";
 
@@ -28,6 +29,7 @@ export const DEFAULT_MANIFEST = {
     { type: "CLOCK", durationMs: 10000 },
     { type: "WEATHER", durationMs: 8000 },
     { type: "CLOCK", durationMs: 10000 },
+    { type: "DATE", durationMs: 6000 },
     { type: "PLANES", durationMs: 9000 },
     { type: "QUOTE", durationMs: 7000 },
   ],
@@ -138,6 +140,9 @@ export function getBitmap(name, size = 64, deviceId = "default") {
   if (n === "radar") {
     return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt };
   }
+  if (n === "date") {
+    return { name: n, frames: dateFrames(size), frameDelayMs: 6000, updatedAt: Date.now() };
+  }
   if (n === "weather") {
     return { name: n, frames: weather.frames, frameDelayMs: weather.frameDelayMs, updatedAt: weather.updatedAt };
   }
@@ -215,6 +220,10 @@ export function resolveManifest(deviceId = "default", size = 64) {
         }
       }
       pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450) });
+      continue;
+    }
+    if (t === "DATE") {
+      pages.push({ type: "BITMAP", name: "date", loops: 1, frameDelayMs: posInt(p.durationMs, 6000) });
       continue;
     }
     if (t === "WEATHER") {

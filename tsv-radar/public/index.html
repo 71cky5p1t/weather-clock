@@ -75,7 +75,7 @@
     <h2>Clock <span class="right muted" id="clock-sub">live, display timezone</span></h2>
     <div class="row">
       <img id="clock" class="pix" width="192" height="192" alt="clock">
-      <div class="muted" style="max-width:220px">Rendered by the server with the same geometry as the firmware. <a href="/api/clock-sheet.png" target="_blank" style="color:var(--yellow)">Contact sheet of 100 times</a>.</div>
+      <div class="muted" style="max-width:220px">Same geometry as the firmware. <a href="/clock-lab.html" style="color:var(--yellow)">Open the clock lab</a> to jump to any time, watch tick-overs and tweak the geometry, or view a <a href="/api/clock-sheet.png" target="_blank" style="color:var(--yellow)">contact sheet</a>.</div>
     </div>
   </section>
 
@@ -154,7 +154,7 @@
       <span class="msg" id="config-msg"></span>
     </div>
     <p class="muted" style="margin:10px 0 0">
-      Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
+      Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>DATE</code> (durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
       <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>

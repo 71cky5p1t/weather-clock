@@ -45,6 +45,7 @@ const STARTED_AT = Date.now();
 const app = express();
 app.use(express.json({ limit: "256kb" }));
 app.use(express.static(path.join(__dirname, "public")));
+app.get("/lib/clock-core.js", (req, res) => res.type("application/javascript").sendFile(path.join(__dirname, "lib", "clock-core.js")));
 
 // Optional write protection. If ADMIN_TOKEN is set, mutating requests need
 // header `x-admin-token: <token>` (or ?token=).

@@ -243,7 +243,7 @@ static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
   layoutRow(md, 2, mc, 0, WIDTH);
   int descX = stemX(hc[hn - 1], true);
   int ascX  = stemX(mc[0], false);
-  if (hc[hn - 1].d == 1 && mc[0].d == 1) ascX = -1;   // two tall 1s dissolve the rows
+  if (hc[hn - 1].d == 1 && mc[0].d == 1) { descX = -1; ascX = -1; }   // two tall 1s dissolve the rows
 
   // pass 2: squeeze each row away from the other's stem
   int hx0 = (ascX >= 0) ? ascX + DIGIT_STROKE + STEM_GAP : 0;
@@ -283,10 +283,8 @@ static void drawClock(uint8_t alpha) {
   drawClockDigits(info.tm_hour, info.tm_min, info.tm_sec, (info.tm_sec % 2) == 0);
 }
 
-static void renderClock(uint8_t alpha) {
-  drawClock(alpha);
-  matrix.show();
-}
+static void renderClock(uint8_t alpha);   // defined after the morph helpers
+
 
 // ── STATUS SCREEN ────────────────────────────────────────────────
 static void showStatus(const char *l1, const char *l2 = nullptr, const char *l3 = nullptr, uint16_t colour = 0) {
@@ -367,12 +365,16 @@ static void allocMorph() {
 
 static inline void snapshotCanvas(uint16_t *dst) { memcpy(dst, matrix.getBuffer(), FRAME_BYTES); }
 
+// Pixels lit in both frames stay put (colour cross-fade); only pixels that
+// differ travel, paired in scan order.
 static bool buildMorph() {
   morphNA = morphNB = 0;
-  for (int i = 0; i < FRAME_PIXELS; i++) if (snapA[i]) morphA[morphNA++] = i;
-  for (int i = 0; i < FRAME_PIXELS; i++) if (snapB[i]) morphB[morphNB++] = i;
-  if (morphNA == 0 || morphNB == 0) return false;
-  morphCount = max(morphNA, morphNB);
+  for (int i = 0; i < FRAME_PIXELS; i++) {
+    bool inA = snapA[i] != 0, inB = snapB[i] != 0;
+    if (inA && !inB) morphA[morphNA++] = i;
+    else if (inB && !inA) morphB[morphNB++] = i;
+  }
+  morphCount = (morphNA && morphNB) ? max(morphNA, morphNB) : 0;
   return true;
 }
 
@@ -385,9 +387,23 @@ static inline uint16_t lerp565(uint16_t a, uint16_t b, int e256) {
   return (uint16_t)((r << 11) | (g << 5) | bl);
 }
 
+static float easeInOut(float t) {
+  return t < 0.5f ? 4 * t * t * t : 1 - powf(-2 * t + 2, 3) / 2;
+}
+
 static void drawMorph(int e256) {
   matrix.fillScreen(0);
   uint16_t *buf = matrix.getBuffer();
+  // static pixels: lit in both, colour cross-fades
+  for (int i = 0; i < FRAME_PIXELS; i++) {
+    if (snapA[i] && snapB[i]) buf[i] = lerp565(snapA[i], snapB[i], e256);
+  }
+  if (morphCount == 0) {
+    // one side has nothing to pair with: fade the leftovers in place
+    for (int k = 0; k < morphNA; k++) { int i = morphA[k]; buf[i] = lerp565(snapA[i], 0, e256); }
+    for (int k = 0; k < morphNB; k++) { int i = morphB[k]; buf[i] = lerp565(0, snapB[i], e256); }
+    return;
+  }
   for (int k = 0; k < morphCount; k++) {
     int a = morphA[(uint32_t)k * morphNA / morphCount];
     int b = morphB[(uint32_t)k * morphNB / morphCount];
@@ -398,6 +414,38 @@ static void drawMorph(int e256) {
     if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) continue;
     buf[y * WIDTH + x] = lerp565(snapA[a], snapB[b], e256);
   }
+}
+
+// Clock render with a short pixel-morph when the minute ticks over, so the
+// digits re-flow into their new widths instead of snapping.
+static const uint32_t TICK_MORPH_MS = 500;
+static int lastClockMinute = -1;
+
+static void renderClock(uint8_t alpha) {
+  struct tm info;
+  bool ok = getLocalTimeSafe(&info);
+  if (ok && alpha == 255 && morphReady && lastClockMinute >= 0 && info.tm_min != lastClockMinute) {
+    snapshotCanvas(snapA);          // the :59 frame still in the canvas
+    drawClock(255);
+    snapshotCanvas(snapB);          // the new minute
+    if (buildMorph()) {
+      uint32_t t0 = millis();
+      for (;;) {
+        uint32_t dt = millis() - t0;
+        if (dt >= TICK_MORPH_MS) break;
+        drawMorph((int)(easeInOut(dt / (float)TICK_MORPH_MS) * 256));
+        matrix.show();
+        delay(8);
+      }
+      matrix.drawRGBBitmap(0, 0, snapB, WIDTH, HEIGHT);
+    }
+    matrix.show();
+    lastClockMinute = info.tm_min;
+    return;
+  }
+  drawClock(alpha);
+  matrix.show();
+  if (ok) lastClockMinute = info.tm_min;
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────
@@ -747,6 +795,7 @@ static void startPage(int idx, uint32_t now) {
     curPool = -1;
   }
   pageFailStreak = 0;
+  lastClockMinute = -1;
   Serial.printf("[page] %s\n", pg.name);
 }
 
@@ -848,9 +897,7 @@ void loop() {
         enterShow(now);
         break;
       }
-      float t = dt / (float)MORPH_MS;
-      float e = t < 0.5f ? 4 * t * t * t : 1 - powf(-2 * t + 2, 3) / 2;   // ease in-out
-      drawMorph((int)(e * 256));
+      drawMorph((int)(easeInOut(dt / (float)MORPH_MS) * 256));
       matrix.show();
       delay(8);
     } break;

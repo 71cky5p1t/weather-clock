@@ -27,7 +27,7 @@ npm install
 npm run dev          # local, uses ./manifest.json and ./content
 ```
 
-Open `http://<server>:8787/` for the dashboard: radar preview, weather cards, device list, message sender and a playlist editor.
+Open `http://<server>:8787/` for the dashboard: radar preview, live clock, weather cards, planes, device list, message sender and a playlist editor. `/clock-lab.html` is an interactive clock mockup: jump to any time, play at up to 600×, watch the minute tick-over morph, and tweak the digit geometry live (the constants map 1:1 to the firmware).
 
 Environment (see `.env.example`): `LAT`, `LON`, `LOCATION_NAME` for the weather; `PRODUCT_ID` for the BoM radar (default `IDR1064`, Townsville); `ADMIN_TOKEN` to protect the dashboard's write actions when exposed outside the LAN.
 
@@ -77,7 +77,7 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 }
 ```
 
-- `RADAR` – BoM loop. Shown only when rain is around: forecast chance ≥ `rainChanceMin` (default 30%) in the next 12 h, or rain echoes on the latest scan, or it's raining now. Set `"onlyWhenRain": false` to always show it. `WEATHER` – today card (7-seg temperature, animated icon, hi/lo/rain blocks). `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
+- `RADAR` – BoM loop. Shown only when rain is around: forecast chance ≥ `rainChanceMin` (default 30%) in the next 12 h, or rain echoes on the latest scan, or it's raining now. Set `"onlyWhenRain": false` to always show it. `WEATHER` – today card (7-seg temperature, animated icon, LO / RAIN / HI columns). `DATE` – day in the clock's digits over the month name. `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
 - Add `"enabled": false` to park a page. Per-device overrides go under `devices.<deviceId>`.
 - Messages sent from the dashboard are injected into the playlist automatically for the chosen number of minutes.
 - The server skips pages whose data isn't available yet (e.g. radar before the first BoM fetch) and the dashboard tells you why.
@@ -105,7 +105,7 @@ What the device does:
 
 - Boots, shows WiFi status and its device ID, syncs NTP, pulls the manifest.
 - Plays the playlist with a pixel-morph transition: every lit pixel of the outgoing page travels to a lit pixel of the incoming one. The next bitmap page is prefetched on core 0 into PSRAM while the current one plays, so transitions don't stall.
-- Clock is Flux-style: digit widths flex to fill each row (a `1` is narrow, a single-digit hour spans the whole row), minute-by-minute Mondrian colour rotation, seconds wipe.
+- Clock is Flux-style: digit widths flex to fill each row (a `1` is narrow, a single-digit hour spans the whole row), interlocking stems (a trailing 4/7/1 in the hour drops through the minute row, a leading 4/1 in the minutes rises through the hour row), minute-by-minute Mondrian colour rotation, seconds wipe, and a 500 ms pixel morph on every minute tick. The clock engine lives in `tsv-radar/lib/clock-core.js` and is mirrored in `weatherclock.ino`.
 - Re-polls the manifest every `pollMs`, sends a heartbeat (RSSI, heap, uptime, current page), and reconnects WiFi if it drops (reboots after 5 minutes offline).
 - Dims between `nightStart` and `nightEnd` (wraps midnight correctly; v1 went back to full brightness at 00:00).
 - Optional OTA: set `defaults.ota` (`enabled`, `auto`, `version`, `url`) and drop the `.bin` into `tsv-radar/firmware/`.
