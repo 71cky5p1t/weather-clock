@@ -13,6 +13,7 @@ export const GEOMETRY = {
   stroke: 6,         // minimum segment thickness (chosen from the 100-time review)
   strokeDiv: 0,      // if >0, stroke grows with digit width: max(stroke, drawnWidth / strokeDiv)
   oneStyle: "centered", // "centered" bar for 1s, or "seg" for classic right-side 1
+  leadingZero: 0,    // 1 = always two hour digits (09:41), 0 = single digit spans the row (Flux)
 };
 
 const RING = [C.red, C.blue, C.white, C.yellow];
@@ -83,7 +84,7 @@ export function renderClock(hh, mm, ss, size = 64, geometry = {}) {
   const cur = paletteFromRot(mm & 3);
   const prev = paletteFromRot((mm + 3) & 3);
 
-  const hours = hh < 10 ? [hh] : [Math.floor(hh / 10), hh % 10];
+  const hours = hh < 10 && !g.leadingZero ? [hh] : [Math.floor(hh / 10), hh % 10];
   const hcells = layoutRow(hours, size, g);
   drawDigit(cv, hcells[0].d, hcells[0].x, 0, hcells[0].w, rowH, cur.tl, prev.tl, yCut, g);
   if (hcells[1]) drawDigit(cv, hcells[1].d, hcells[1].x, 0, hcells[1].w, rowH, cur.tr, prev.tr, yCut, g);
@@ -95,12 +96,17 @@ export function renderClock(hh, mm, ss, size = 64, geometry = {}) {
 }
 
 // Contact sheet: an array of [hh, mm, ss] laid out in a grid.
-export function renderSheet(times, cols = 10, size = 64, gap = 2, geometry = {}) {
+export function renderSheet(times, cols = 10, size = 64, gap = 2, geometry = {}, labels = false) {
   const rows = Math.ceil(times.length / cols);
-  const cv = new Canvas(cols * (size + gap) + gap, rows * (size + gap) + gap, [24, 24, 28]);
+  const labelH = labels ? 8 : 0;
+  const cv = new Canvas(cols * (size + gap) + gap, rows * (size + gap + labelH) + gap, [24, 24, 28]);
   times.forEach(([hh, mm, ss], i) => {
     const tile = renderClock(hh, mm, ss, size, geometry);
-    const ox = gap + (i % cols) * (size + gap), oy = gap + Math.floor(i / cols) * (size + gap);
+    const ox = gap + (i % cols) * (size + gap), oy = gap + Math.floor(i / cols) * (size + gap + labelH);
+    if (labels) {
+      const t = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+      cv.text(ox + Math.floor((size - Canvas.measure(t, { font: "3x5" })) / 2), oy + size + 2, t, [150, 150, 160], { font: "3x5" });
+    }
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       const k = (y * size + x) * 4;
       cv.set(ox + x, oy + y, [tile.data[k], tile.data[k + 1], tile.data[k + 2]]);

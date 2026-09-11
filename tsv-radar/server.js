@@ -138,7 +138,7 @@ app.get("/api/clock/:time.png", async (req, res) => {
 });
 app.get("/api/clock-sheet.png", async (req, res) => {
   const scale = Math.max(1, Math.min(4, Number(req.query.scale) || 2));
-  res.set("Cache-Control", "no-store").type("png").send(await renderSheet(sampleTimes(), 10, SIZE, 2, geometryFromQuery(req.query)).toPng(scale));
+  res.set("Cache-Control", "no-store").type("png").send(await renderSheet(sampleTimes(), 10, SIZE, 2, geometryFromQuery(req.query), req.query.labels !== "0").toPng(scale));
 });
 
 // ── dashboard / admin API ──────────────────────────────
