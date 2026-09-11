@@ -16,7 +16,7 @@
     "messageDurationMs": 8000
   },
   "pages": [
-    { "type": "RADAR", "loops": 5, "frameDelayMs": 450 },
+    { "type": "RADAR", "loops": 5, "frameDelayMs": 450, "onlyWhenRain": true, "rainChanceMin": 30 },
     { "type": "CLOCK", "durationMs": 10000 },
     { "type": "WEATHER", "durationMs": 8000 },
     { "type": "CLOCK", "durationMs": 10000 },
@@ -29,7 +29,7 @@
       "pages": [
         { "type": "CLOCK", "durationMs": 15000 },
         { "type": "WEATHER", "durationMs": 10000 },
-        { "type": "RADAR", "loops": 3, "frameDelayMs": 450 },
+        { "type": "RADAR", "loops": 3, "frameDelayMs": 450, "onlyWhenRain": true },
         { "type": "CONTENT", "name": "family", "loops": 2, "enabled": false }
       ]
     }

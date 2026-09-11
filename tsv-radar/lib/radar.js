@@ -200,6 +200,12 @@ async function buildRadarFrame(frame, index, size) {
   const radarRgba = await img.resize(size, size).raw().toBuffer();
   remapRadarPaletteInPlace(radarRgba);
 
+  // how many pixels carry a rain echo (used to decide whether to show the page)
+  let echoPx = 0;
+  for (let i = 0; i < radarRgba.length; i += 4) {
+    if (radarRgba[i + 3] > 0 && (radarRgba[i] + radarRgba[i + 1] + radarRgba[i + 2]) > 60) echoPx++;
+  }
+
   const out = Buffer.from(bg);
   for (let i = 0; i < out.length; i += 4) {
     const a = radarRgba[i + 3] / 255;
@@ -217,7 +223,7 @@ async function buildRadarFrame(frame, index, size) {
     .toFile(`${DEBUG_DIR}/frame_${index}.png`)
     .catch(() => {});
 
-  return rgbaToRgb565BE(out);
+  return { buf: rgbaToRgb565BE(out), echoPx };
 }
 
 export async function refreshRadar(size = 64) {
@@ -236,7 +242,8 @@ export async function refreshRadar(size = 64) {
     }
     const out = [];
     for (let i = 0; i < raw.length; i++) {
-      out.push({ i, ts: parseBomTsFromName(raw[i].name), name: raw[i].name, buf: await buildRadarFrame(raw[i], i, size) });
+      const { buf, echoPx } = await buildRadarFrame(raw[i], i, size);
+      out.push({ i, ts: parseBomTsFromName(raw[i].name), name: raw[i].name, buf, echoPx });
     }
     radar.frames = out;
     radar.updatedAt = Date.now();
@@ -266,6 +273,12 @@ export function startRadarScheduler(size, refreshSeconds) {
     }
   };
   tick();
+}
+
+// Rain echo pixels in the newest frame (0 when the scan is clear).
+export function radarEchoPx() {
+  const last = radar.frames[radar.frames.length - 1];
+  return last ? last.echoPx : 0;
 }
 
 export function radarAgeSeconds() {

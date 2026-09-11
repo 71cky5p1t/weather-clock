@@ -77,7 +77,7 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 }
 ```
 
-- `RADAR` – BoM loop. `WEATHER` – today card (7-seg temperature, animated icon, hi/lo/rain blocks). `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
+- `RADAR` – BoM loop. Shown only when rain is around: forecast chance ≥ `rainChanceMin` (default 30%) in the next 12 h, or rain echoes on the latest scan, or it's raining now. Set `"onlyWhenRain": false` to always show it. `WEATHER` – today card (7-seg temperature, animated icon, hi/lo/rain blocks). `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
 - Add `"enabled": false` to park a page. Per-device overrides go under `devices.<deviceId>`.
 - Messages sent from the dashboard are injected into the playlist automatically for the chosen number of minutes.
 - The server skips pages whose data isn't available yet (e.g. radar before the first BoM fetch) and the dashboard tells you why.

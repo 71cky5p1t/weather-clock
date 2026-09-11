@@ -5,7 +5,7 @@
 
 import fs from "fs";
 import crypto from "crypto";
-import { radar } from "./radar.js";
+import { radar, radarEchoPx } from "./radar.js";
 import { weather } from "./weather.js";
 import { content, safeName } from "./content.js";
 import { renderTextCard, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
@@ -24,7 +24,7 @@ export const DEFAULT_MANIFEST = {
     messageDurationMs: 8000,
   },
   pages: [
-    { type: "RADAR", loops: 5, frameDelayMs: 450 },
+    { type: "RADAR", loops: 5, frameDelayMs: 450, onlyWhenRain: true, rainChanceMin: 30 },
     { type: "CLOCK", durationMs: 10000 },
     { type: "WEATHER", durationMs: 8000 },
     { type: "CLOCK", durationMs: 10000 },
@@ -198,6 +198,21 @@ export function resolveManifest(deviceId = "default", size = 64) {
       if (!radar.frames.length) {
         skipped.push({ type: t, reason: "no radar frames yet" });
         continue;
+      }
+      // Only show the radar when rain is around: either the forecast gives a
+      // decent chance in the next 12 h, or the latest scan has echoes on it.
+      const onlyWhenRain = p.onlyWhenRain !== false;
+      if (onlyWhenRain) {
+        const chance = weather.data?.rainToday ?? null;
+        const raining = (weather.data?.precip ?? 0) > 0 || (weather.data?.code ?? 0) >= 51;
+        const minChance = posInt(p.rainChanceMin, 30);
+        const minEchoPx = posInt(p.minEchoPx, 12);
+        const echo = radarEchoPx();
+        const wet = raining || (chance != null && chance >= minChance) || echo >= minEchoPx;
+        if (!wet) {
+          skipped.push({ type: t, reason: `no rain expected (chance ${chance ?? "?"}% < ${minChance}%, ${echo} echo px on radar)` });
+          continue;
+        }
       }
       pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450) });
       continue;

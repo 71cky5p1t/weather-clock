@@ -13,7 +13,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { rgb565ToPng } from "./lib/pixel.js";
-import { radar, refreshRadar, startRadarScheduler, radarAgeSeconds, DEBUG_DIR } from "./lib/radar.js";
+import { radar, refreshRadar, startRadarScheduler, radarAgeSeconds, radarEchoPx, DEBUG_DIR } from "./lib/radar.js";
 import { weather, refreshWeather, startWeatherScheduler } from "./lib/weather.js";
 import { content, refreshContent, startContentScheduler, safeName } from "./lib/content.js";
 import { message, messageActive, setMessage, clearMessage } from "./lib/text.js";
@@ -158,6 +158,7 @@ app.get("/api/status", (req, res) => {
       lastError: radar.lastError,
       consecutiveFailures: radar.consecutiveFailures,
       ageS: radarAgeSeconds(),
+      echoPx: radarEchoPx(),
       frames: radar.frames.map((f) => ({ i: f.i, ts: f.ts })),
     },
     weather: {

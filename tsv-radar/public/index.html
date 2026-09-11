@@ -154,7 +154,7 @@
       <span class="msg" id="config-msg"></span>
     </div>
     <p class="muted" style="margin:10px 0 0">
-      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
+      Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
       <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>
@@ -218,6 +218,7 @@ function render() {
   $("#radar-stats").innerHTML = dl([
     ["Frames", r.count, r.count ? "" : "bad"],
     ["Newest scan", r.ageS == null ? "—" : dur(r.ageS) + " old", r.ageS > 1800 ? "warn" : ""],
+    ["Rain echoes", r.echoPx ? r.echoPx + " px" : "none (scan is clear)"],
     ["Last fetch", ago(r.updatedAt)],
     ["Status", r.lastError ? esc(r.lastError) : "OK", r.lastError ? "bad" : "ok"],
   ]);
