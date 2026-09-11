@@ -428,6 +428,42 @@ const ICONS = {
     "................",
     "................",
   ],
+  sunShort: [
+    "................",
+    ".......Y........",
+    "....Y.....Y.....",
+    ".....YYYYY......",
+    "....YYYYYYY.....",
+    "...YYYYYYYYY....",
+    ".Y.YYYYYYYYY.Y..",
+    "...YYYYYYYYY....",
+    "...YYYYYYYYY....",
+    "....YYYYYYY.....",
+    ".....YYYYY......",
+    "....Y.....Y.....",
+    ".......Y........",
+    "................",
+    "................",
+    "................",
+  ],
+  partlyShort: [
+    "................",
+    "....Y..Y........",
+    "..YYYYY.........",
+    ".YYYYYY.Y.......",
+    "..YYYYY..WWW....",
+    "....YYY.WWWWW...",
+    "....Y..WWWWWWWW.",
+    "......WWWWWWWWWW",
+    ".....WWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    ".....WWWWWWWWWW.",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
   moon: [
     "................",
     "......MMM.......",
@@ -648,9 +684,60 @@ export function iconNames() {
   return Object.keys(ICONS);
 }
 
-export function drawIcon(canvas, name, x, y, size = 16) {
-  const rows = size === 8 ? MINI[name] || MINI.unknown : ICONS[name] || ICONS.unknown;
-  canvas.sprite(x, y, rows, PAL, 1);
+// Animation phases (0..3) give each icon a little life: the sun pulses, rain
+// and snow fall, storms flash, clouds drift, fog rolls, the moon twinkles.
+export const ICON_PHASES = 4;
+
+function shiftRow(row, d) {
+  const n = row.length;
+  if (d > 0) return (".".repeat(d) + row).slice(0, n);
+  if (d < 0) return (row + ".".repeat(-d)).slice(-d, n - d);
+  return row;
+}
+
+function animateIcon(name, rows, phase) {
+  const p = ((phase % ICON_PHASES) + ICON_PHASES) % ICON_PHASES;
+  const odd = p % 2 === 1;
+  switch (name) {
+    case "sun":
+      return { rows: odd ? ICONS.sunShort : rows, dx: 0 };
+    case "partly":
+      return { rows: odd ? ICONS.partlyShort : rows, dx: 0 };
+    case "rain":
+    case "drizzle":
+    case "snow": {
+      // roll the precipitation rows (8..15) downward by p pixels
+      const out = rows.slice();
+      for (let i = 8; i < 16; i++) out[8 + ((i - 8 + p) % 8)] = rows[i];
+      return { rows: out, dx: 0 };
+    }
+    case "storm": {
+      const out = rows.map((r) => (p >= 2 ? r.replace(/L/g, ".") : r));
+      for (let i = 8; i < 16; i++) out[8 + ((i - 8 + p) % 8)] = (p >= 2 ? rows[i].replace(/L/g, ".") : rows[i]);
+      return { rows: out, dx: 0 };
+    }
+    case "cloud":
+    case "overcast":
+    case "partlyNight":
+      return { rows, dx: [0, 1, 1, 0][p] };
+    case "fog":
+      return { rows: rows.map((r, i) => shiftRow(r, (i % 4 === 2 ? 1 : -1) * [0, 1, 1, 0][p])), dx: 0 };
+    case "moon": {
+      const out = rows.slice();
+      const stars = [[13, 2], [3, 11], [14, 6], [2, 4]];
+      const [sx, sy] = stars[p];
+      out[sy] = out[sy].slice(0, sx) + "M" + out[sy].slice(sx + 1);
+      return { rows: out, dx: 0 };
+    }
+    default:
+      return { rows, dx: 0 };
+  }
+}
+
+export function drawIcon(canvas, name, x, y, size = 16, phase = 0) {
+  const base = size === 8 ? MINI[name] || MINI.unknown : ICONS[name] || ICONS.unknown;
+  const { rows, dx } = size === 8 ? { rows: base, dx: 0 } : animateIcon(name, base, phase);
+  canvas.sprite(x + dx, y, rows, PAL, 1);
 }
 
 // Map a WMO weather code (Open-Meteo) to an icon name + label.
@@ -670,13 +757,11 @@ export function wmoToIcon(code, isDay = true) {
   return { icon: "unknown", label: "Unknown" };
 }
 
-// Colour a temperature (°C) on a cool→hot ramp.
+// Colour a temperature (°C) using only the clock's Mondrian palette.
 export function tempColour(t) {
   if (t == null || Number.isNaN(t)) return C.grey;
-  if (t <= 10) return C.sky;
-  if (t <= 18) return C.cyan;
-  if (t <= 24) return C.green;
-  if (t <= 29) return C.yellow;
-  if (t <= 34) return C.orange;
-  return C.red;
+  if (t <= 12) return C.sky;    // cold
+  if (t <= 22) return C.white;  // mild
+  if (t <= 31) return C.yellow; // warm
+  return C.red;                 // hot
 }

@@ -77,7 +77,7 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 }
 ```
 
-- `RADAR` – BoM loop. `WEATHER` – today card (7-seg temperature, hi/lo/rain blocks). `FORECAST` – 3-day card. `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
+- `RADAR` – BoM loop. `WEATHER` – today card (7-seg temperature, animated icon, hi/lo/rain blocks). `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
 - Add `"enabled": false` to park a page. Per-device overrides go under `devices.<deviceId>`.
 - Messages sent from the dashboard are injected into the playlist automatically for the chosen number of minutes.
 - The server skips pages whose data isn't available yet (e.g. radar before the first BoM fetch) and the dashboard tells you why.
@@ -104,7 +104,8 @@ Legacy `/frames` and `/frame/:i.bin` still work for the v1 firmware.
 What the device does:
 
 - Boots, shows WiFi status and its device ID, syncs NTP, pulls the manifest.
-- Plays the playlist with fades. The next bitmap page is prefetched on core 0 into PSRAM while the current one plays, so transitions don't stall.
+- Plays the playlist with a pixel-morph transition: every lit pixel of the outgoing page travels to a lit pixel of the incoming one. The next bitmap page is prefetched on core 0 into PSRAM while the current one plays, so transitions don't stall.
+- Clock is Flux-style: digit widths flex to fill each row (a `1` is narrow, a single-digit hour spans the whole row), minute-by-minute Mondrian colour rotation, seconds wipe.
 - Re-polls the manifest every `pollMs`, sends a heartbeat (RSSI, heap, uptime, current page), and reconnects WiFi if it drops (reboots after 5 minutes offline).
 - Dims between `nightStart` and `nightEnd` (wraps midnight correctly; v1 went back to full brightness at 00:00).
 - Optional OTA: set `defaults.ota` (`enabled`, `auto`, `version`, `url`) and drop the `.bin` into `tsv-radar/firmware/`.

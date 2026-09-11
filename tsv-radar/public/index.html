@@ -74,8 +74,7 @@
   <section class="card">
     <h2>Weather <span class="right" id="weather-sub"></span></h2>
     <div class="row">
-      <img id="wx0" class="pix" width="192" height="192" alt="today">
-      <img id="wx1" class="pix" width="192" height="192" alt="forecast" title="FORECAST page (3-day)">
+      <canvas id="wx" width="192" height="192" class="pix"></canvas>
     </div>
     <dl class="stat" id="weather-stats" style="margin-top:10px"></dl>
     <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/refresh-weather">Fetch now</button></p>
@@ -147,7 +146,7 @@
       <span class="msg" id="config-msg"></span>
     </div>
     <p class="muted" style="margin:10px 0 0">
-      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>FORECAST</code> (3-day) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
+      Page types: <code>RADAR</code> (loops, frameDelayMs) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
       <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>
@@ -218,9 +217,7 @@ function render() {
 
   // weather
   const w = s.weather;
-  $("#wx0").src = w.count ? `/api/bitmap/weather/0.png?scale=3${bust}` : "";
-  $("#wx1").src = w.count ? `/api/bitmap/forecast/0.png?scale=3${bust}` : "";
-  $("#wx1").hidden = !w.count;
+  animate($("#wx"), "weather", w.count, 350, bust);
   const d = w.data;
   $("#weather-sub").textContent = d ? d.location : "";
   $("#weather-stats").innerHTML = d
@@ -285,6 +282,19 @@ function render() {
     ? s.content.map((a) => `<figure style="margin:0;text-align:center"><img class="pix" width="96" height="96" src="/api/bitmap/${esc(a.name)}/0.png?scale=2${bust}"><figcaption class="muted" style="font-size:12px">${esc(a.name)}<br>${a.count} frame${a.count === 1 ? "" : "s"}</figcaption></figure>`).join("")
     : `<span class="muted">Drop PNG / JPG / GIF / WebP files into the content folder and reference them with a CONTENT page.</span>`;
   $("#manifest-path").textContent = s.manifestPath;
+}
+
+const animTimers = {};
+function animate(canvas, name, count, delay, bust) {
+  clearInterval(animTimers[name]);
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  if (!count) { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height); return; }
+  const imgs = Array.from({ length: count }, (_, i) => { const im = new Image(); im.src = `/api/bitmap/${name}/${i}.png?${bust.slice(1)}`; return im; });
+  let idx = 0;
+  const draw = () => { const im = imgs[idx]; if (im.complete && im.naturalWidth) ctx.drawImage(im, 0, 0, canvas.width, canvas.height); idx = (idx + 1) % count; };
+  imgs[0].onload = draw;
+  animTimers[name] = setInterval(draw, delay);
 }
 
 function loadRadar(count, bust) {

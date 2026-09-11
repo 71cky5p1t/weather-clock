@@ -21,8 +21,7 @@
     { "type": "WEATHER", "durationMs": 8000 },
     { "type": "CLOCK", "durationMs": 10000 },
     { "type": "PLANES", "durationMs": 9000 },
-    { "type": "QUOTE", "durationMs": 7000 },
-    { "type": "FORECAST", "durationMs": 8000, "enabled": false }
+    { "type": "QUOTE", "durationMs": 7000 }
   ],
   "devices": {
     "example-kitchen": {

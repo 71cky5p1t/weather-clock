@@ -139,13 +139,7 @@ export function getBitmap(name, size = 64, deviceId = "default") {
     return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt };
   }
   if (n === "weather") {
-    return { name: n, frames: weather.frames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
-  }
-  if (n === "forecast") {
-    return { name: n, frames: weather.forecastFrames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
-  }
-  if (n === "weather-detail") {
-    return { name: n, frames: weather.detailFrames, frameDelayMs: 8000, updatedAt: weather.updatedAt };
+    return { name: n, frames: weather.frames, frameDelayMs: weather.frameDelayMs, updatedAt: weather.updatedAt };
   }
   if (n.startsWith("planes")) {
     const site = planeSites.get(n);
@@ -208,14 +202,16 @@ export function resolveManifest(deviceId = "default", size = 64) {
       pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450) });
       continue;
     }
-    if (t === "WEATHER" || t === "FORECAST" || t === "WEATHER-DETAIL") {
-      const name = t.toLowerCase();
-      const frames = name === "weather" ? weather.frames : name === "forecast" ? weather.forecastFrames : weather.detailFrames;
-      if (!frames.length) {
+    if (t === "WEATHER") {
+      const n = weather.frames.length;
+      if (!n) {
         skipped.push({ type: t, reason: "no weather data yet" });
         continue;
       }
-      pages.push({ type: "BITMAP", name, loops: 1, frameDelayMs: posInt(p.durationMs, 8000) });
+      // animated icon: cycle the phase frames for roughly durationMs
+      const durationMs = posInt(p.durationMs, 8000);
+      const loops = Math.max(1, Math.round(durationMs / (n * weather.frameDelayMs)));
+      pages.push({ type: "BITMAP", name: "weather", loops, frameDelayMs: weather.frameDelayMs });
       continue;
     }
     if (t === "PLANES") {

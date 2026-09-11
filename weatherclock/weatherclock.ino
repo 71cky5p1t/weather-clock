@@ -32,7 +32,7 @@
 // ── TUNABLES ─────────────────────────────────────────────────────
 static const int      MAX_FRAMES      = MAX_FRAMES_T; // per bitmap page (server NUM_FRAMES <= this)
 static const int      MAX_PAGES       = MAX_PAGES_T;
-static const uint32_t FADE_MS         = 700;       // fade-out and fade-in, each
+static const uint32_t MORPH_MS        = 900;       // pixel-morph transition length
 static const uint32_t CLOCK_TICK_MS   = 40;
 static const uint32_t HTTP_TIMEOUT_MS = 8000;
 static const uint32_t WIFI_GIVEUP_MS  = 5 * 60 * 1000;  // reboot if offline this long
@@ -125,7 +125,6 @@ static uint16_t MONDRIAN_BLUE()   { return col(0, 48, 135); }
 static uint16_t MONDRIAN_YELLOW() { return col(255, 221, 0); }
 static uint16_t MONDRIAN_WHITE()  { return col(240, 240, 240); }
 static uint16_t MONDRIAN_BLACK()  { return col(0, 0, 0); }
-static uint16_t MONDRIAN_COLON()  { return col(200, 200, 200); }
 
 static void paletteFromRot(int rot, uint16_t &tl, uint16_t &tr, uint16_t &br, uint16_t &bl) {
   uint16_t ring[4] = { MONDRIAN_RED(), MONDRIAN_BLUE(), MONDRIAN_WHITE(), MONDRIAN_YELLOW() };
@@ -179,16 +178,24 @@ static void drawDigitInCell(uint8_t d, int cx, int cy, int cw, int ch, uint16_t 
   drawSegmentRects(cx, cy, cw, ch, DIGIT_MASK[d], cTop, cBot, yCut);
 }
 
-static void drawColonWipe(bool on, int yCut) {
-  int cx = WIDTH / 2 - 1;
-  uint16_t c = on ? MONDRIAN_COLON() : MONDRIAN_BLACK();
-  fillRectWipe(cx, HEIGHT / 2 - 7, 2, 2, c, c, yCut);
-  fillRectWipe(cx, HEIGHT / 2 + 7, 2, 2, c, c, yCut);
+// Flux-style layout: digits share the row width in proportion to how much
+// room they need. A "1" is narrow, everything else is wide, and a single-digit
+// hour stretches across the whole row.
+static int digitWeight(int d) { return d == 1 ? 40 : 100; }
+
+static void layoutRow(const int *digits, int n, int *xs, int *ws) {
+  int total = 0;
+  for (int i = 0; i < n; i++) total += digitWeight(digits[i]);
+  int x = 0;
+  for (int i = 0; i < n; i++) {
+    int w = (i == n - 1) ? (WIDTH - x) : (WIDTH * digitWeight(digits[i])) / total;
+    xs[i] = x; ws[i] = w; x += w;
+  }
 }
 
-static void drawClockDigits(int hh, int mm, int ss, bool colonOn) {
+static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
   matrix.fillScreen(MONDRIAN_BLACK());
-  const int cell = WIDTH / 2;
+  const int rowH = HEIGHT / 2;
   int yCut = ((ss + 1) * HEIGHT) / 60;
   yCut = constrain(yCut, 0, HEIGHT);
 
@@ -197,15 +204,22 @@ static void drawClockDigits(int hh, int mm, int ss, bool colonOn) {
   paletteFromRot(rotCur, TLc, TRc, BRc, BLc);
   paletteFromRot(rotPrev, TLp, TRp, BRp, BLp);
 
-  drawDigitInCell((hh / 10) % 10, 0,    0,    cell, cell, TLc, TLp, yCut);
-  drawDigitInCell(hh % 10,        cell, 0,    cell, cell, TRc, TRp, yCut);
-  drawDigitInCell((mm / 10) % 10, 0,    cell, cell, cell, BLc, BLp, yCut);
-  drawDigitInCell(mm % 10,        cell, cell, cell, cell, BRc, BRp, yCut);
-  drawColonWipe(colonOn, yCut);
+  // hours: one wide digit before 10:00, two weighted digits after
+  int hd[2], hx[2], hw[2], hn;
+  if (hh < 10) { hd[0] = hh; hn = 1; } else { hd[0] = hh / 10; hd[1] = hh % 10; hn = 2; }
+  layoutRow(hd, hn, hx, hw);
+  drawDigitInCell(hd[0], hx[0], 0, hw[0], rowH, TLc, TLp, yCut);
+  if (hn == 2) drawDigitInCell(hd[1], hx[1], 0, hw[1], rowH, TRc, TRp, yCut);
+
+  // minutes: always two digits
+  int md[2] = { mm / 10, mm % 10 }, mx[2], mw[2];
+  layoutRow(md, 2, mx, mw);
+  drawDigitInCell(md[0], mx[0], rowH, mw[0], rowH, BLc, BLp, yCut);
+  drawDigitInCell(md[1], mx[1], rowH, mw[1], rowH, BRc, BRp, yCut);
 }
 
-// Render the clock at (scheduled brightness × alpha).
-static void renderClock(uint8_t alpha) {
+// Draw the clock into the canvas at (scheduled brightness × alpha); no show().
+static void drawClock(uint8_t alpha) {
   struct tm info;
   BRIGHT = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
   if (!getLocalTimeSafe(&info)) {
@@ -214,10 +228,13 @@ static void renderClock(uint8_t alpha) {
     matrix.setTextColor(col(120, 120, 120));
     matrix.setCursor(8, 28);
     matrix.print("--:--");
-    matrix.show();
     return;
   }
   drawClockDigits(info.tm_hour, info.tm_min, info.tm_sec, (info.tm_sec % 2) == 0);
+}
+
+static void renderClock(uint8_t alpha) {
+  drawClock(alpha);
   matrix.show();
 }
 
@@ -260,8 +277,8 @@ static void allocPools() {
 
 static inline uint16_t *poolFrame(FramePool &p, int i) { return p.data + (size_t)i * FRAME_PIXELS; }
 
-// Draw a pooled frame at (scheduled brightness × alpha).
-static void renderBitmap(FramePool &p, int frame, uint8_t alpha) {
+// Draw a pooled frame into the canvas at (scheduled brightness × alpha); no show().
+static void drawBitmap(FramePool &p, int frame, uint8_t alpha) {
   if (!p.ready || p.count <= 0) return;
   frame = constrain(frame, 0, p.count - 1);
   uint8_t total = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
@@ -272,7 +289,65 @@ static void renderBitmap(FramePool &p, int frame, uint8_t alpha) {
     for (int i = 0; i < FRAME_PIXELS; i++) fadeTmp[i] = scale565(src[i], total);
     matrix.drawRGBBitmap(0, 0, fadeTmp, WIDTH, HEIGHT);
   }
+}
+
+static void renderBitmap(FramePool &p, int frame, uint8_t alpha) {
+  drawBitmap(p, frame, alpha);
   matrix.show();
+}
+
+// ── MORPH TRANSITION ─────────────────────────────────────────────
+// Every lit pixel of the outgoing page travels to the position (and colour)
+// of a lit pixel in the incoming page. Pairing is by scan order, so the image
+// re-flows rather than scatters.
+static uint16_t *snapA = nullptr, *snapB = nullptr;   // canvas snapshots
+static uint16_t *morphA = nullptr, *morphB = nullptr; // lit pixel indices
+static int morphNA = 0, morphNB = 0, morphCount = 0;
+static bool morphReady = false;
+
+static void allocMorph() {
+  size_t n = FRAME_PIXELS * sizeof(uint16_t);
+  bool ps = psramFound();
+  snapA  = (uint16_t *)malloc(FRAME_BYTES);
+  snapB  = (uint16_t *)malloc(FRAME_BYTES);
+  morphA = (uint16_t *)(ps ? heap_caps_malloc(n, MALLOC_CAP_SPIRAM) : malloc(n));
+  morphB = (uint16_t *)(ps ? heap_caps_malloc(n, MALLOC_CAP_SPIRAM) : malloc(n));
+  morphReady = snapA && snapB && morphA && morphB;
+}
+
+static inline void snapshotCanvas(uint16_t *dst) { memcpy(dst, matrix.getBuffer(), FRAME_BYTES); }
+
+static bool buildMorph() {
+  morphNA = morphNB = 0;
+  for (int i = 0; i < FRAME_PIXELS; i++) if (snapA[i]) morphA[morphNA++] = i;
+  for (int i = 0; i < FRAME_PIXELS; i++) if (snapB[i]) morphB[morphNB++] = i;
+  if (morphNA == 0 || morphNB == 0) return false;
+  morphCount = max(morphNA, morphNB);
+  return true;
+}
+
+static inline uint16_t lerp565(uint16_t a, uint16_t b, int e256) {
+  int ar = (a >> 11) & 0x1F, ag = (a >> 5) & 0x3F, ab = a & 0x1F;
+  int br = (b >> 11) & 0x1F, bg = (b >> 5) & 0x3F, bb = b & 0x1F;
+  int r = ar + (((br - ar) * e256) >> 8);
+  int g = ag + (((bg - ag) * e256) >> 8);
+  int bl = ab + (((bb - ab) * e256) >> 8);
+  return (uint16_t)((r << 11) | (g << 5) | bl);
+}
+
+static void drawMorph(int e256) {
+  matrix.fillScreen(0);
+  uint16_t *buf = matrix.getBuffer();
+  for (int k = 0; k < morphCount; k++) {
+    int a = morphA[(uint32_t)k * morphNA / morphCount];
+    int b = morphB[(uint32_t)k * morphNB / morphCount];
+    int ax = a & (WIDTH - 1), ay = a / WIDTH;
+    int bx = b & (WIDTH - 1), by = b / WIDTH;
+    int x = ax + (((bx - ax) * e256 + 128) >> 8);
+    int y = ay + (((by - ay) * e256 + 128) >> 8);
+    if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) continue;
+    buf[y * WIDTH + x] = lerp565(snapA[a], snapB[b], e256);
+  }
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────
@@ -530,9 +605,9 @@ static bool ensureWifi() {
 }
 
 // ── PLAYER STATE MACHINE ─────────────────────────────────────────
-enum Phase : uint8_t { PH_FADE_IN, PH_SHOW, PH_FADE_OUT };
+enum Phase : uint8_t { PH_MORPH, PH_SHOW };
 
-static Phase    phase = PH_FADE_IN;
+static Phase    phase = PH_SHOW;
 static uint32_t tPhase = 0;
 static int      curPool = -1;      // pool index for the current BITMAP page
 static int      frameIdx = 0;
@@ -610,8 +685,6 @@ static void startPage(int idx, uint32_t now) {
         // clock in this slot for ~15 s, then it tries the playlist again.
         pageFailStreak = 0;
         curPool = -1;
-        phase = PH_FADE_IN;
-        tPhase = now;
         return;
       }
       startPage(nextPageIndex(idx), now);
@@ -624,14 +697,27 @@ static void startPage(int idx, uint32_t now) {
     curPool = -1;
   }
   pageFailStreak = 0;
-  phase = PH_FADE_IN;
-  tPhase = now;
   Serial.printf("[page] %s\n", pg.name);
 }
 
-static void renderCurrent(uint8_t alpha, int frame) {
-  if (page().type == PAGE_BITMAP && curPool >= 0) renderBitmap(pools[curPool], frame, alpha);
-  else renderClock(alpha);
+static void drawCurrent(uint8_t alpha, int frame) {
+  if (page().type == PAGE_BITMAP && curPool >= 0) drawBitmap(pools[curPool], frame, alpha);
+  else drawClock(alpha);
+}
+
+// Snapshot what's on screen, load the next page, and morph into its first frame.
+static void beginTransition(int nextIdx, uint32_t now) {
+  snapshotCanvas(snapA);
+  startPage(nextIdx, now);
+  drawCurrent(255, 0);
+  snapshotCanvas(snapB);
+  if (morphReady && buildMorph()) {
+    phase = PH_MORPH;
+    tPhase = now;
+  } else {
+    matrix.show();
+    enterShow(now);
+  }
 }
 
 static void maybePoll(uint32_t now, bool force) {
@@ -661,6 +747,7 @@ void setup() {
   matrix.show();
 
   allocPools();
+  allocMorph();
   if (poolCount == 0 || !fadeTmp) {
     showStatus("NO MEMORY", "for frames", nullptr, col(227, 0, 15));
     for (;;) delay(1000);
@@ -692,6 +779,7 @@ void setup() {
   maybePoll(millis(), true);
   updateScheduledBright();
   startPage(0, millis());
+  enterShow(millis());
 }
 
 void loop() {
@@ -702,12 +790,19 @@ void loop() {
   const bool isClock = (pg.type != PAGE_BITMAP) || curPool < 0;
 
   switch (phase) {
-    case PH_FADE_IN: {
-      if (singlePage() && isClock) { enterShow(now); break; }
+    case PH_MORPH: {
       uint32_t dt = now - tPhase;
-      if (dt >= FADE_MS) { renderCurrent(255, 0); enterShow(now); break; }
-      renderCurrent((uint8_t)(dt * 255 / FADE_MS), 0);
-      delay(10);
+      if (dt >= MORPH_MS) {
+        matrix.drawRGBBitmap(0, 0, snapB, WIDTH, HEIGHT);
+        matrix.show();
+        enterShow(now);
+        break;
+      }
+      float t = dt / (float)MORPH_MS;
+      float e = t < 0.5f ? 4 * t * t * t : 1 - powf(-2 * t + 2, 3) / 2;   // ease in-out
+      drawMorph((int)(e * 256));
+      matrix.show();
+      delay(8);
     } break;
 
     case PH_SHOW: {
@@ -718,8 +813,8 @@ void loop() {
         maybePoll(now, false);                       // cheap moment to talk to the server
         uint32_t dur = pg.type == PAGE_CLOCK ? pg.durationMs : 15000;
         if (now - tPhase >= dur) {
-          if (!singlePage())              { phase = PH_FADE_OUT; tPhase = now; }
-          else if (pg.type == PAGE_BITMAP) startPage(curPage, now);   // lone bitmap page failed earlier: retry
+          if (!singlePage())              beginTransition(nextPageIndex(curPage), now);
+          else if (pg.type == PAGE_BITMAP) { startPage(curPage, now); enterShow(now); }   // lone bitmap page failed earlier: retry
         }
         delay(CLOCK_TICK_MS);
         break;
@@ -739,7 +834,7 @@ void loop() {
               if (fresh >= 0) curPool = fresh;
               prefetchArmed = false;
             }
-            else { phase = PH_FADE_OUT; tPhase = now; break; }
+            else { beginTransition(nextPageIndex(curPage), now); break; }
           }
         }
         renderBitmap(pool, frameIdx, 255);
@@ -750,16 +845,5 @@ void loop() {
       delay(5);
     } break;
 
-    case PH_FADE_OUT: {
-      uint32_t dt = now - tPhase;
-      int lastFrame = isClock ? 0 : max(0, frameIdx - 1);
-      if (dt >= FADE_MS) {
-        renderCurrent(0, lastFrame);
-        startPage(nextPageIndex(curPage), now);
-        break;
-      }
-      renderCurrent((uint8_t)(255 - dt * 255 / FADE_MS), lastFrame);
-      delay(10);
-    } break;
   }
 }
