@@ -3,7 +3,7 @@
     "pollMs": 60000,
     "tz": "AEST-10",
     "bright": { "day": 200, "night": 26, "nightStart": 22, "nightEnd": 7 },
-    "ota": { "enabled": false, "auto": false, "checkMs": 21600000, "version": "", "url": "" },
+    "ota": { "enabled": true, "auto": true, "checkMs": 21600000, "version": "2.1.0", "url": "http://192.168.1.18:8787/firmware/weatherclock-2.1.0.bin" },
     "quotes": [
       "Stay curious.",
       "Make something today.",
@@ -30,6 +30,9 @@
     { "type": "QUOTE", "durationMs": 7000 }
   ],
   "devices": {
+    "mp-2cd164": {
+      "skip": ["PLANES"]
+    },
     "example-kitchen": {
       "bright": { "night": 10 },
       "pages": [

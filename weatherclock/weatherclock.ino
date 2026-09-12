@@ -13,7 +13,7 @@
 //
 // Libraries: Adafruit Protomatter, Adafruit GFX, ArduinoJson (v7)
 
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.1.0"
 
 #include "board.h"
 #include "secrets.h"

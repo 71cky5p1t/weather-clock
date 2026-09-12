@@ -73,7 +73,10 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
     { "type": "QUOTE",   "durationMs": 7000 },
     { "type": "CONTENT", "name": "family", "loops": 2 }
   ],
-  "devices": { "kitchen": { "bright": { "night": 10 }, "pages": [ ... ] } }
+  "devices": {
+    "kitchen": { "bright": { "night": 10 }, "pages": [ ... ] },
+    "mp-2cd164": { "skip": ["PLANES"] }
+  }
 }
 ```
 
@@ -103,6 +106,23 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 Legacy `/frames` and `/frame/:i.bin` still work for the v1 firmware.
 
 ## Firmware
+
+### Updating over the air
+
+The board polls the manifest every minute and, when `defaults.ota` names a version other than the one it is running, downloads that `.bin` and reboots (it shows UPDATING while it flashes). To ship a new build:
+
+1. Bump `FW_VERSION` in `weatherclock/weatherclock.ino`.
+2. Compile and copy the app image into the server's firmware folder (it is bind-mounted into the container and served at `/firmware/`):
+
+```bash
+arduino-cli compile --fqbn esp32:esp32:adafruit_matrixportal_esp32s3 --build-path /tmp/wc-build weatherclock && cp /tmp/wc-build/weatherclock.ino.bin tsv-radar/firmware/weatherclock-<version>.bin
+```
+
+3. Point `defaults.ota` in `tsv-radar/manifest.json` at it: `{ "enabled": true, "auto": true, "version": "<version>", "url": "http://192.168.1.18:8787/firmware/weatherclock-<version>.bin" }`.
+4. Commit and push; the webhook deploys it and the board updates on its next poll.
+
+The image is built for `BOARD_VARIANT 1` (Adafruit pin order). A clone board (variant 2) would get red and blue swapped from it, so give such a device its own `ota.url` under `devices.<id>` pointing at a variant-2 build.
+
 
 1. Copy `weatherclock/secrets.example.h` to `weatherclock/secrets.h` and fill in WiFi + server URL.
 2. In `weatherclock/board.h` set `BOARD_VARIANT` to `1` (Adafruit) or `2` (AliExpress clone).
