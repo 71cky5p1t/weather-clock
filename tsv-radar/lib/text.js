@@ -47,13 +47,11 @@ export function renderTextCard(text, { size = 64, accent, colour, header } = {})
     chosen = { ...c, lines };
   }
 
+  // Messages get a header with a rule under it; quotes are just the words.
   if (header) {
     cv.textCentered(1, header.toUpperCase().slice(0, 10), C.grey);
     cv.hline(0, 10, size, ac);
-  } else {
-    cv.hline(0, 0, size, ac);
   }
-  cv.hline(0, size - 2, size, ac);
 
   const blockH = chosen.lines.length * chosen.lineH - 2;
   let y = top + Math.floor((avail - blockH) / 2);

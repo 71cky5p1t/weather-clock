@@ -223,12 +223,14 @@ export function resolveManifest(deviceId = "default", size = 64) {
   const d = resolvedDefaults(deviceId);
   const dev = cfg.devices?.[deviceId] || {};
   const srcPages = Array.isArray(dev.pages) && dev.pages.length ? dev.pages : cfg.pages;
+  // devices.<id>.skip: page types this device leaves out of the shared playlist
+  const skip = new Set((Array.isArray(dev.skip) ? dev.skip : []).map((t) => String(t).toUpperCase()));
 
   const pages = [];
   const skipped = [];
   for (const p of srcPages) {
     const t = String(p.type || "").toUpperCase();
-    if (p.enabled === false) continue;
+    if (p.enabled === false || skip.has(t)) continue;
 
     if (t === "CLOCK") {
       pages.push({ type: "CLOCK", durationMs: posInt(p.durationMs, 10000) });

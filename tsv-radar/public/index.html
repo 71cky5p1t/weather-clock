@@ -183,7 +183,7 @@
     </div>
     <p class="muted" style="margin:10px 0 0">
       Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>DATE</code> · <code>MONDRIAN</code> · <code>MOON</code> · <code>SUN</code> · <code>GIF</code> (loops) · <code>COUNTDOWN</code> (label, date, yearly) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
-      <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
+      <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it. Under <code>devices</code>, a device can give its own <code>pages</code> list or just <code>"skip": ["PLANES"]</code> to leave types out of the shared one.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>
   </section>
