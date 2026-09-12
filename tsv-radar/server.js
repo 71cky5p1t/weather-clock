@@ -90,6 +90,7 @@ app.get("/api/bitmap/:name", (req, res) => {
     bytesPerFrame: SIZE * SIZE * 2,
     updatedAt: bm.updatedAt,
     text: bm.text,
+    morphExclude: bm.morphExclude || [],   // rects the device cuts instead of morphing
   });
 });
 

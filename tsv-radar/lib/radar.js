@@ -23,6 +23,7 @@ export const radar = {
   frames: [], // { i, ts, name, buf }
   refreshing: false,
   productId: PRODUCT_ID,
+  morphExclude: [], // rects (timestamp box) the device swaps instantly instead of morphing
 };
 
 function fmtHHMM(tsSec) {
@@ -90,6 +91,7 @@ function drawTimestampRGBA(buffer, width, height, text) {
   const cv = new Canvas(width, height);
   const w = Canvas.measure(text) + 4;
   const x = width - w - 1;
+  radar.morphExclude = [{ x, y: 1, w, h: 12 }];
   cv.rect(x, 1, w, 12, [0, 0, 0]);
   cv.text(x + 2, 3, text, [255, 221, 0]);
   for (let py = 1; py < 13; py++) for (let px = x; px < x + w; px++) {

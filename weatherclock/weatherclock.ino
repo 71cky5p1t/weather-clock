@@ -390,6 +390,17 @@ static uint16_t *snapA = nullptr, *snapB = nullptr;   // canvas snapshots
 static uint16_t *morphA = nullptr, *morphB = nullptr; // lit pixel indices
 static int morphNA = 0, morphNB = 0, morphCount = 0;
 static bool morphReady = false;
+static const ExRect *morphEx = nullptr;   // regions cut instead of morphed (set per morph)
+static int morphExCount = 0;
+
+static inline bool inExcluded(int i) {
+  int x = i & (WIDTH - 1), y = i / WIDTH;
+  for (int k = 0; k < morphExCount; k++) {
+    const ExRect &r = morphEx[k];
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return true;
+  }
+  return false;
+}
 
 static void allocMorph() {
   size_t n = FRAME_PIXELS * sizeof(uint16_t);
@@ -405,9 +416,12 @@ static inline void snapshotCanvas(uint16_t *dst) { memcpy(dst, matrix.getBuffer(
 
 // Pixels lit in both frames stay put (colour cross-fade); only pixels that
 // differ travel, paired in scan order.
-static bool buildMorph() {
+static bool buildMorph(const ExRect *ex = nullptr, int exCount = 0) {
+  morphEx = ex;
+  morphExCount = ex ? exCount : 0;
   morphNA = morphNB = 0;
   for (int i = 0; i < FRAME_PIXELS; i++) {
+    if (morphExCount && inExcluded(i)) continue;
     bool inA = snapA[i] != 0, inB = snapB[i] != 0;
     if (inA && !inB) morphA[morphNA++] = i;
     else if (inB && !inA) morphB[morphNB++] = i;
@@ -432,8 +446,9 @@ static float easeInOut(float t) {
 static void drawMorph(int e256) {
   matrix.fillScreen(0);
   uint16_t *buf = matrix.getBuffer();
-  // static pixels: lit in both, colour cross-fades
+  // static pixels: lit in both, colour cross-fades; excluded regions cut straight to B
   for (int i = 0; i < FRAME_PIXELS; i++) {
+    if (morphExCount && inExcluded(i)) { buf[i] = snapB[i]; continue; }
     if (snapA[i] && snapB[i]) buf[i] = lerp565(snapA[i], snapB[i], e256);
   }
   if (morphCount == 0) {
@@ -550,6 +565,11 @@ static bool loadBitmapInto(FramePool &p, const char *name) {
   int count = doc["count"] | 0;
   uint32_t delayMs = doc["frameDelayMs"] | 0;
   if (count <= 0) return false;
+  p.exCount = 0;
+  for (JsonObject r : doc["morphExclude"].as<JsonArray>()) {
+    if (p.exCount >= 4) break;
+    p.ex[p.exCount++] = { (uint8_t)(r["x"] | 0), (uint8_t)(r["y"] | 0), (uint8_t)(r["w"] | 0), (uint8_t)(r["h"] | 0) };
+  }
   if (count > MAX_FRAMES) count = MAX_FRAMES;
 
   for (int i = 0; i < count; i++) {
@@ -1004,7 +1024,7 @@ void loop() {
           snapshotCanvas(snapA);
           drawBitmap(pool, frameIdx, 255);
           snapshotCanvas(snapB);
-          if (buildMorph()) {
+          if (buildMorph(pool.ex, pool.exCount)) {
             uint32_t t0 = millis();
             for (;;) {
               uint32_t dt = millis() - t0;

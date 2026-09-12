@@ -119,7 +119,6 @@ export function renderTodayCard(d, size = 64, phase = 0) {
 
   // header: condition (the date has its own page)
   cv.textCentered(1, d.label.toUpperCase().slice(0, 10), C.white);
-  cv.hline(0, 10, size, C.dim);
 
   // big 7-seg temperature (4 px stroke) + degree ring
   const t = d.temp == null ? null : Math.round(d.temp);
@@ -135,16 +134,12 @@ export function renderTodayCard(d, size = 64, phase = 0) {
   // icon
   drawIcon(cv, d.icon, 46, 16, 16, phase);
 
-  cv.hline(0, 40, size, C.dim);
-
   // LO | RAIN | HI: coloured accent bar, grey label, coloured value
   const cols = [
     { x: 0, w: 17, colour: C.sky, label: "LO", value: `${fmtTemp(today.lo)}°` },
     { x: 20, w: 25, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
     { x: 47, w: 17, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
   ];
-  cv.vline(18, 43, 21, C.dim);
-  cv.vline(45, 43, 21, C.dim);
   for (const c of cols) {
     cv.rect(c.x + 1, 43, c.w - 2, 2, c.colour);
     cv.text(c.x + Math.floor((c.w - Canvas.measure(c.label)) / 2), 47, c.label, C.grey);

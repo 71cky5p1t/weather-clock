@@ -149,7 +149,7 @@ export function getBitmap(name, size = 64, deviceId = "default") {
   const d = resolvedDefaults(deviceId);
 
   if (n === "radar") {
-    return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt };
+    return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt, morphExclude: radar.morphExclude };
   }
   if (n === "mondrian") {
     return { name: n, frames: mondrianFrames(size), frameDelayMs: MONDRIAN_FRAME_MS, updatedAt: Date.now() };

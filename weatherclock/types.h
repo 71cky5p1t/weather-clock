@@ -36,12 +36,17 @@ struct Config {
 // one digit's slot in a clock row
 struct Cell { int d, x, w; };
 
+// rectangle that is cut, not morphed, between frames (e.g. a timestamp box)
+struct ExRect { uint8_t x, y, w, h; };
+
 struct FramePool {
   uint16_t *data;
   int       count;
   uint32_t  frameDelayMs;
   char      name[24];
   uint32_t  loadedAt;
+  ExRect    ex[4];
+  int       exCount;
   volatile bool ready;
 };
 
