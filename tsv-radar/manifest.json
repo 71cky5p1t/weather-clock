@@ -3,7 +3,7 @@
     "pollMs": 60000,
     "tz": "AEST-10",
     "bright": { "day": 200, "night": 26, "nightStart": 22, "nightEnd": 7 },
-    "ota": { "enabled": true, "auto": true, "checkMs": 21600000, "version": "2.1.0", "url": "http://192.168.1.18:8787/firmware/weatherclock-2.1.0.bin" },
+    "ota": { "enabled": true, "auto": true, "checkMs": 21600000, "version": "2.1.1", "url": "http://192.168.1.18:8787/firmware/weatherclock-2.1.1.bin" },
     "quotes": [
       "Stay curious.",
       "Make something today.",

@@ -13,7 +13,7 @@
 //
 // Libraries: Adafruit Protomatter, Adafruit GFX, ArduinoJson (v7)
 
-#define FW_VERSION "2.1.0"
+#define FW_VERSION "2.1.1"
 
 #include "board.h"
 #include "secrets.h"
@@ -169,8 +169,10 @@ static void drawSegmentRects(int x, int y, int w, int h, uint8_t mask, uint16_t 
   if (mask & (1 << 3)) fillRectWipe(x0, y1 - t,    x1 - x0, t, cTop, cBot, yCut); // D
 
   bool gOn = (mask & (1 << 6)) != 0;
+  // upper stems stop at the middle bar; lower stems run from mid to the bottom
+  // edge (starting at mid they overlap G rather than fall short of the bottom)
   int halfTop = gOn ? (mid - y0 - t/2) : (mid - y0);
-  int halfBot = gOn ? (y1 - (mid + t/2)) : (y1 - mid);
+  int halfBot = y1 - mid;
   if (halfTop < 0) halfTop = 0;
   if (halfBot < 0) halfBot = 0;
 

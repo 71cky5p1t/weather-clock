@@ -64,8 +64,10 @@ function drawDigit(cv, d, x, y, w, h, top, bottom, yCut, g) {
 
   const mask = MASK[d] ?? 0;
   const gOn = (mask & (1 << 6)) !== 0;
+  // upper stems stop at the middle bar; lower stems run from the middle to the
+  // bottom edge (they start at mid, so they overlap G rather than fall short of D)
   const halfTop = Math.max(0, gOn ? mid - y0 - Math.floor(t / 2) : mid - y0);
-  const halfBot = Math.max(0, gOn ? y1 - (mid + Math.floor(t / 2)) : y1 - mid);
+  const halfBot = Math.max(0, y1 - mid);
   if (mask & (1 << 0)) fillWipe(cv, x0, y0, x1 - x0, t, top, bottom, yCut);                       // A
   if (mask & (1 << 6)) fillWipe(cv, x0, mid - Math.floor(t / 2), x1 - x0, t, top, bottom, yCut);  // G
   if (mask & (1 << 3)) fillWipe(cv, x0, y1 - t, x1 - x0, t, top, bottom, yCut);                   // D
