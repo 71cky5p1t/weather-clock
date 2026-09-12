@@ -4,3 +4,5 @@ tsv-radar/node_modules/
 tsv-radar/.debug/
 tsv-radar/.env
 build/
+tsv-radar/content/gifs/.commons/
+tsv-radar/content/gifs/.giphy/

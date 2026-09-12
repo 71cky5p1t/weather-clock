@@ -33,6 +33,7 @@
 static const int      MAX_FRAMES      = MAX_FRAMES_T; // per bitmap page (server NUM_FRAMES <= this)
 static const int      MAX_PAGES       = MAX_PAGES_T;
 static const uint32_t MORPH_MS        = 900;       // pixel-morph transition length
+static const int      FRAME_MORPH_MAX_DIST = 10;   // frame animations: pair pixels within this, else fade
 static const uint32_t CLOCK_TICK_MS   = 40;
 static const uint32_t HTTP_TIMEOUT_MS = 8000;
 static const uint32_t WIFI_GIVEUP_MS  = 5 * 60 * 1000;  // reboot if offline this long
@@ -306,24 +307,6 @@ static void drawClock(uint8_t alpha) {
 static void renderClock(uint8_t alpha);   // defined after the morph helpers
 
 
-// ── TIMER PAGE ───────────────────────────────────────────────────
-// Minutes over seconds in the clock's digits; wipe shows the current minute
-// draining. When it reaches zero the panel flashes red for a while.
-static void drawTimer(uint8_t alpha) {
-  BRIGHT = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
-  time_t now = time(nullptr);
-  long remaining = (long)page().endsAt - (long)now;
-  if (remaining <= 0) {
-    bool on = (millis() / 500) % 2 == 0;
-    matrix.fillScreen(on ? col(227, 0, 15) : 0);
-    if (!on) drawClockDigits(0, 0, 59, false);
-    return;
-  }
-  int mm = min(99L, remaining / 60);
-  int ss = remaining % 60;
-  drawClockDigits(mm, ss, 59 - ss, false);
-}
-
 // ── STATUS SCREEN ────────────────────────────────────────────────
 static void showStatus(const char *l1, const char *l2 = nullptr, const char *l3 = nullptr, uint16_t colour = 0) {
   BRIGHT = scheduledBright;
@@ -387,7 +370,9 @@ static void renderBitmap(FramePool &p, int frame, uint8_t alpha) {
 // of a lit pixel in the incoming page. Pairing is by scan order, so the image
 // re-flows rather than scatters.
 static uint16_t *snapA = nullptr, *snapB = nullptr;   // canvas snapshots
-static uint16_t *morphA = nullptr, *morphB = nullptr; // lit pixel indices
+static uint16_t *morphA = nullptr, *morphB = nullptr; // lit pixel indices (scan-order mode) / pairs (nearest mode)
+static uint8_t  *flagA = nullptr, *flagB = nullptr;   // per pixel: 1 = differs, 2 = matched
+static int morphMaxDist = 0;                          // 0 = scan-order pairing, >0 = nearest within this many px
 static int morphNA = 0, morphNB = 0, morphCount = 0;
 static bool morphReady = false;
 static const ExRect *morphEx = nullptr;   // regions cut instead of morphed (set per morph)
@@ -407,26 +392,84 @@ static void allocMorph() {
   bool ps = psramFound();
   snapA  = (uint16_t *)malloc(FRAME_BYTES);
   snapB  = (uint16_t *)malloc(FRAME_BYTES);
-  morphA = (uint16_t *)(ps ? heap_caps_malloc(n, MALLOC_CAP_SPIRAM) : malloc(n));
-  morphB = (uint16_t *)(ps ? heap_caps_malloc(n, MALLOC_CAP_SPIRAM) : malloc(n));
-  morphReady = snapA && snapB && morphA && morphB;
+  morphA = (uint16_t *)(ps ? heap_caps_malloc(2 * n, MALLOC_CAP_SPIRAM) : malloc(2 * n));
+  morphB = (uint16_t *)(ps ? heap_caps_malloc(2 * n, MALLOC_CAP_SPIRAM) : malloc(2 * n));
+  flagA  = (uint8_t *)malloc(FRAME_PIXELS);
+  flagB  = (uint8_t *)malloc(FRAME_PIXELS);
+  morphReady = snapA && snapB && morphA && morphB && flagA && flagB;
 }
 
 static inline void snapshotCanvas(uint16_t *dst) { memcpy(dst, matrix.getBuffer(), FRAME_BYTES); }
 
 // Pixels lit in both frames stay put (colour cross-fade); only pixels that
 // differ travel, paired in scan order.
-static bool buildMorph(const ExRect *ex = nullptr, int exCount = 0) {
+// Nearest differing pixel of the other frame within maxDist (Chebyshev rings).
+static int nearestIn(const uint8_t *flags, int from, int maxDist) {
+  int fx = from & (WIDTH - 1), fy = from / WIDTH;
+  for (int r = 0; r <= maxDist; r++) {
+    for (int dy = -r; dy <= r; dy++) {
+      int y = fy + dy;
+      if (y < 0 || y >= HEIGHT) continue;
+      bool edge = (dy == -r || dy == r);
+      for (int dx = -r; dx <= r; dx += edge ? 1 : 2 * r) {
+        int x = fx + dx;
+        if (x < 0 || x >= WIDTH) continue;
+        int i = y * WIDTH + x;
+        if (flags[i] == 1) return i;
+        if (r == 0) break;
+      }
+    }
+  }
+  return -1;
+}
+
+// maxDist == 0: pair differing pixels in scan order (whole image re-flows).
+// maxDist  > 0: pair each differing pixel with the nearest one on the other
+//               side within maxDist; anything without a partner fades in place.
+static bool buildMorph(const ExRect *ex = nullptr, int exCount = 0, int maxDist = 0) {
   morphEx = ex;
   morphExCount = ex ? exCount : 0;
+  morphMaxDist = maxDist;
   morphNA = morphNB = 0;
+  memset(flagA, 0, FRAME_PIXELS);
+  memset(flagB, 0, FRAME_PIXELS);
   for (int i = 0; i < FRAME_PIXELS; i++) {
     if (morphExCount && inExcluded(i)) continue;
     bool inA = snapA[i] != 0, inB = snapB[i] != 0;
-    if (inA && !inB) morphA[morphNA++] = i;
-    else if (inB && !inA) morphB[morphNB++] = i;
+    if (inA && !inB) { flagA[i] = 1; if (!maxDist) morphA[morphNA++] = i; }
+    else if (inB && !inA) { flagB[i] = 1; if (!maxDist) morphB[morphNB++] = i; }
   }
-  morphCount = (morphNA && morphNB) ? max(morphNA, morphNB) : 0;
+  if (!maxDist) {
+    morphCount = (morphNA && morphNB) ? max(morphNA, morphNB) : 0;
+    return true;
+  }
+  // nearest-neighbour pairs: A -> B, then unmatched B <- A
+  morphCount = 0;
+  for (int i = 0; i < FRAME_PIXELS; i++) {
+    if (flagA[i] != 1) continue;
+    int j = nearestIn(flagB, i, maxDist);
+    if (j < 0) continue;
+    morphA[morphCount] = i; morphB[morphCount] = j; morphCount++;
+    flagA[i] = 2; flagB[j] = 2;
+  }
+  for (int j = 0; j < FRAME_PIXELS; j++) {
+    if (flagB[j] != 1) continue;
+    int i = nearestIn(flagA, j, maxDist);
+    if (i < 0) { i = -1; }
+    if (i < 0) {
+      // no unmatched A nearby: borrow the nearest matched one so B still gets a traveller
+      int fx = j & (WIDTH - 1), fy = j / WIDTH, best = -1;
+      for (int dy = -maxDist; dy <= maxDist && best < 0; dy++) for (int dx = -maxDist; dx <= maxDist; dx++) {
+        int x = fx + dx, y = fy + dy;
+        if (x < 0 || y < 0 || x >= WIDTH || y >= HEIGHT) continue;
+        if (flagA[y * WIDTH + x] == 2) { best = y * WIDTH + x; break; }
+      }
+      i = best;
+    }
+    if (i < 0) continue;
+    morphA[morphCount] = i; morphB[morphCount] = j; morphCount++;
+    flagB[j] = 2;
+  }
   return true;
 }
 
@@ -450,6 +493,21 @@ static void drawMorph(int e256) {
   for (int i = 0; i < FRAME_PIXELS; i++) {
     if (morphExCount && inExcluded(i)) { buf[i] = snapB[i]; continue; }
     if (snapA[i] && snapB[i]) buf[i] = lerp565(snapA[i], snapB[i], e256);
+  }
+  if (morphMaxDist) {
+    // unmatched pixels fade in place
+    for (int i = 0; i < FRAME_PIXELS; i++) {
+      if (flagA[i] == 1) buf[i] = lerp565(snapA[i], 0, e256);
+      else if (flagB[i] == 1) buf[i] = lerp565(0, snapB[i], e256);
+    }
+    for (int k = 0; k < morphCount; k++) {
+      int a = morphA[k], b = morphB[k];
+      int ax = a & (WIDTH - 1), ay = a / WIDTH, bx = b & (WIDTH - 1), by = b / WIDTH;
+      int x = ax + (((bx - ax) * e256 + 128) >> 8);
+      int y = ay + (((by - ay) * e256 + 128) >> 8);
+      buf[y * WIDTH + x] = lerp565(snapA[a], snapB[b], e256);
+    }
+    return;
   }
   if (morphCount == 0) {
     // one side has nothing to pair with: fade the leftovers in place
@@ -866,6 +924,8 @@ static void startPage(int idx, uint32_t now) {
   Serial.printf("[page] %s\n", pg.name);
 }
 
+static void drawTimer(uint8_t alpha);
+
 static void drawCurrent(uint8_t alpha, int frame) {
   if (page().type == PAGE_BITMAP && curPool >= 0) drawBitmap(pools[curPool], frame, alpha);
   else if (page().type == PAGE_TIMER) drawTimer(alpha);
@@ -895,6 +955,24 @@ static void maybePoll(uint32_t now, bool force) {
   lastPollOk = fetchManifest();
   sendHeartbeat();
   maybeOta();
+}
+
+// ── TIMER PAGE ───────────────────────────────────────────────────
+// Minutes over seconds in the clock's digits; wipe shows the current minute
+// draining. When it reaches zero the panel flashes red for a while.
+static void drawTimer(uint8_t alpha) {
+  BRIGHT = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
+  time_t now = time(nullptr);
+  long remaining = (long)page().endsAt - (long)now;
+  if (remaining <= 0) {
+    bool on = (millis() / 500) % 2 == 0;
+    matrix.fillScreen(on ? col(227, 0, 15) : 0);
+    if (!on) drawClockDigits(0, 0, 59, false);
+    return;
+  }
+  int mm = min(99L, remaining / 60);
+  int ss = remaining % 60;
+  drawClockDigits(mm, ss, 59 - ss, false);
 }
 
 // ── SETUP / LOOP ─────────────────────────────────────────────────
@@ -1024,7 +1102,7 @@ void loop() {
           snapshotCanvas(snapA);
           drawBitmap(pool, frameIdx, 255);
           snapshotCanvas(snapB);
-          if (buildMorph(pool.ex, pool.exCount)) {
+          if (buildMorph(pool.ex, pool.exCount, FRAME_MORPH_MAX_DIST)) {
             uint32_t t0 = millis();
             for (;;) {
               uint32_t dt = millis() - t0;

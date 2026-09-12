@@ -14,6 +14,11 @@ const GIF_DIR = path.join(CONTENT_DIR, "gifs");
 const GIPHY_KEY = process.env.GIPHY_API_KEY || "";
 const GIPHY_QUERIES = (process.env.GIPHY_QUERIES || "pixel art,8bit,retro game,pixel loop").split(",").map((s) => s.trim()).filter(Boolean);
 const GIPHY_DIR = path.join(GIF_DIR, ".giphy");
+const COMMONS_DIR = path.join(GIF_DIR, ".commons");
+const COMMONS_ENABLED = process.env.COMMONS_GIFS !== "0";
+const COMMONS_QUERIES = (process.env.COMMONS_QUERIES || "pixel art animated gif,pixel art animation,8-bit animated,sprite animation gif").split(",").map((s) => s.trim()).filter(Boolean);
+const COMMONS_MAX = 24;
+const UA = "weather-clock/2 (https://github.com/71cky5p1t/weather-clock)";
 const GIPHY_MAX = 30;
 const DARK_MIN = Number(process.env.GIF_DARK_MIN || 0.85);
 
@@ -29,6 +34,7 @@ export const gifs = {
   lastError: null,
   dir: GIF_DIR,
   giphy: Boolean(GIPHY_KEY),
+  commons: COMMONS_ENABLED,
 };
 
 // fraction of border pixels that are near black (transparent counts as black)
@@ -72,6 +78,7 @@ export async function refreshGifs(size = 64) {
     const next = new Map();
     await scanDir(GIF_DIR, size, next, "");
     await scanDir(GIPHY_DIR, size, next, "giphy-");
+    await scanDir(COMMONS_DIR, size, next, "commons-");
     gifs.assets = next;
     gifs.updatedAt = Date.now();
     gifs.lastError = null;
@@ -111,6 +118,38 @@ export async function refreshGiphy() {
   }
 }
 
+// Pull small animated GIFs from Wikimedia Commons (free licences, no key).
+// Only files up to 400 KB and 512 px are considered; the dark-border filter
+// then decides what actually gets used.
+export async function refreshCommons() {
+  if (!COMMONS_ENABLED) return;
+  fs.mkdirSync(COMMONS_DIR, { recursive: true });
+  try {
+    const q = COMMONS_QUERIES[Math.floor(Math.random() * COMMONS_QUERIES.length)];
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(q)}&gsrnamespace=6&gsrlimit=40&gsroffset=${Math.floor(Math.random() * 3) * 40}&prop=imageinfo&iiprop=url|size|mime&format=json`;
+    const res = await fetch(url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`commons HTTP ${res.status}`);
+    const json = await res.json();
+    const pages = Object.values(json.query?.pages || {});
+    let added = 0;
+    for (const p of pages) {
+      const ii = p.imageinfo?.[0];
+      if (!ii || ii.mime !== "image/gif" || ii.size > 400000 || ii.width > 512 || ii.height > 512) continue;
+      const file = path.join(COMMONS_DIR, `${safeName(p.title.replace(/^File:/, "").replace(/\.gif$/i, ""))}.gif`);
+      if (fs.existsSync(file)) continue;
+      const r = await fetch(ii.url, { headers: { "user-agent": UA }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) continue;
+      fs.writeFileSync(file, Buffer.from(await r.arrayBuffer()));
+      if (++added >= 12) break;
+    }
+    const files = fs.readdirSync(COMMONS_DIR).map((f) => ({ f, t: fs.statSync(path.join(COMMONS_DIR, f)).mtimeMs })).sort((a, b) => a.t - b.t);
+    while (files.length > COMMONS_MAX) fs.unlinkSync(path.join(COMMONS_DIR, files.shift().f));
+  } catch (err) {
+    gifs.lastError = `commons: ${err.message}`;
+    console.error("commons refresh failed:", err.message);
+  }
+}
+
 // Random pick, sticky for 15 s so the meta + frame fetches of one visit agree.
 export function pickGif() {
   const list = Array.from(gifs.assets.values());
@@ -125,7 +164,8 @@ export function pickGif() {
 
 export function startGifScheduler(size = 64) {
   const tick = () => refreshGifs(size).catch((err) => console.error("gif refresh failed:", err.message));
-  refreshGiphy().then(tick, tick);
+  Promise.allSettled([refreshGiphy(), refreshCommons()]).then(tick);
   setInterval(tick, 5 * 60 * 1000);
   if (GIPHY_KEY) setInterval(() => refreshGiphy().then(tick), 60 * 60 * 1000);
+  if (COMMONS_ENABLED) setInterval(() => refreshCommons().then(tick), 6 * 60 * 60 * 1000);
 }
