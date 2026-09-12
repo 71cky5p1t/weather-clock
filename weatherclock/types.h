@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include "board.h"
 
-static const int MAX_FRAMES_T = 12;
+static const int MAX_FRAMES_T = 24;
 static const int MAX_PAGES_T  = 16;
 
-enum PageType : uint8_t { PAGE_CLOCK, PAGE_BITMAP };
+enum PageType : uint8_t { PAGE_CLOCK, PAGE_BITMAP, PAGE_TIMER };
 
 struct Page {
   PageType type;
@@ -15,6 +15,9 @@ struct Page {
   uint32_t durationMs;   // CLOCK
   uint16_t loops;        // BITMAP
   uint32_t frameDelayMs; // BITMAP (fallback if server meta lacks it)
+  uint32_t holdMs;       // BITMAP: extra hold on the last frame after the loops
+  bool     morph;        // BITMAP: pixel-morph between consecutive frames
+  uint32_t endsAt;       // TIMER: unix seconds
 };
 
 struct Config {

@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "PORT=8787 SIZE=64 BACKGROUND_PATH=./IDR1064.background.jpg MANIFEST_PATH=./manifest.json CONTENT_DIR=./content FIRMWARE_DIR=./firmware DEBUG_DIR=./.debug node server.js"
+    "dev": "PORT=${PORT:-8787} SIZE=64 BACKGROUND_PATH=./IDR1064.background.jpg MANIFEST_PATH=./manifest.json CONTENT_DIR=./content FIRMWARE_DIR=./firmware DEBUG_DIR=./.debug node server.js"
   },
   "engines": {
     "node": ">=20"

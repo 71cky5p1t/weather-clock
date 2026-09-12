@@ -114,6 +114,34 @@
   </section>
 
   <section class="card">
+    <h2>Timer</h2>
+    <form id="timerform" class="form">
+      <div class="inline">
+        <input type="text" id="timer-label" placeholder="Label (optional, 10 chars)" maxlength="10">
+        <input type="number" id="timer-min" value="10" min="1" max="1440" title="minutes">
+        <button class="primary" type="submit">Start</button>
+      </div>
+    </form>
+    <div class="row" style="margin-top:12px; align-items:center">
+      <div id="timer-status" class="msg muted">No timer running.</div>
+      <button id="timer-clear" class="small" hidden>Cancel timer</button>
+    </div>
+    <p class="muted" style="margin:8px 0 0; font-size:12px">While a timer runs the display shows only the countdown (minutes over seconds, clock style) and flashes when it's done.</p>
+  </section>
+
+  <section class="card wide">
+    <h2>Pages <span class="right muted">first frame of every bitmap page in the current playlist</span></h2>
+    <div class="row" id="pages"></div>
+  </section>
+
+  <section class="card">
+    <h2>GIFs <span class="right muted" id="gif-sub"></span></h2>
+    <div class="row" id="gifs"></div>
+    <div class="msg muted" id="gif-note" style="margin-top:8px"></div>
+    <p class="row" style="margin:10px 0 0"><button class="small" data-post="/api/admin/reload-gifs">Rescan GIFs</button></p>
+  </section>
+
+  <section class="card">
     <h2>Quote <span class="right muted" id="quote-sub"></span></h2>
     <div class="row">
       <img id="quote" class="pix" width="128" height="128" alt="quote">
@@ -154,7 +182,7 @@
       <span class="msg" id="config-msg"></span>
     </div>
     <p class="muted" style="margin:10px 0 0">
-      Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>DATE</code> (durationMs) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
+      Page types: <code>RADAR</code> (loops, frameDelayMs, onlyWhenRain, rainChanceMin) · <code>CLOCK</code> (durationMs) · <code>WEATHER</code> (today, durationMs) · <code>DATE</code> · <code>MONDRIAN</code> · <code>MOON</code> · <code>SUN</code> · <code>GIF</code> (loops) · <code>COUNTDOWN</code> (label, date, yearly) · <code>PLANES</code> (durationMs, optional lat/lon/radiusNm/label) ·
       <code>QUOTE</code> (durationMs) · <code>CONTENT</code> (name, loops, frameDelayMs, durationMs). Add <code>"enabled": false</code> to a page to park it.
       Per-device overrides live under <code>devices.&lt;deviceId&gt;</code> and can replace <code>pages</code>, <code>bright</code>, <code>quotes</code>, <code>ota</code>.
     </p>
@@ -255,6 +283,25 @@ function render() {
   $("#msg-status").innerHTML = m ? `Showing <b>${esc(m.text)}</b>${m.from ? " from " + esc(m.from) : ""} · ${dur(m.remainingS)} left` : "No active message.";
   $("#msg-clear").hidden = !m;
 
+  // timer
+  const tm = s.timer;
+  $("#timer-status").textContent = tm.active ? (tm.done ? `Done${tm.label ? " (" + tm.label + ")" : ""} - clearing shortly` : `${Math.floor(tm.remainingS / 60)}:${String(tm.remainingS % 60).padStart(2, "0")} left${tm.label ? " - " + tm.label : ""}`) : "No timer running.";
+  $("#timer-clear").hidden = !tm.active;
+
+  // page previews
+  $("#pages").innerHTML = s.manifest.pages.map((p) => p.type === "CLOCK"
+    ? `<figure style="margin:0;text-align:center"><img class="pix" width="96" height="96" src="/api/clock/now.png?scale=2${bust}"><figcaption class="muted" style="font-size:12px">clock</figcaption></figure>`
+    : p.type === "TIMER" ? `<figure style="margin:0"><figcaption class="muted">timer (rendered on device)</figcaption></figure>`
+    : `<figure style="margin:0;text-align:center"><img class="pix" width="96" height="96" src="/api/bitmap/${esc(p.name)}/0.png?scale=2${bust}"><figcaption class="muted" style="font-size:12px">${esc(p.name)}${p.morph ? " ~" : ""}</figcaption></figure>`).join("");
+
+  // gifs
+  const gf = s.gifs;
+  $("#gif-sub").textContent = `${gf.count} accepted · ${gf.dir}${gf.giphy ? " + Giphy" : ""}`;
+  $("#gifs").innerHTML = gf.assets.length
+    ? gf.assets.map((g) => `<figure style="margin:0;text-align:center"><img class="pix" width="80" height="80" src="/api/bitmap/${esc(g.name)}/0.png?scale=2${bust}" title="${esc(g.file)}"><figcaption class="muted" style="font-size:11px">${g.count}f · dark ${Math.round(g.score * 100)}%</figcaption></figure>`).join("")
+    : `<span class="muted">Drop GIFs (black or transparent background) into the gifs folder inside the content folder.${gf.giphy ? "" : " Or set GIPHY_API_KEY in .env to auto-fetch pixel-art GIFs."}</span>`;
+  $("#gif-note").textContent = (gf.rejected.length ? `Rejected for light backgrounds: ${gf.rejected.map((r) => `${r.file} (${Math.round(r.score * 100)}% dark)`).join(", ")}. ` : "") + (gf.lastError || "");
+
   // quote
   $("#quote").src = `/api/bitmap/quote/0.png?scale=2&deviceId=${encodeURIComponent(deviceId())}${bust}`;
   $("#quote-sub").textContent = s.quote;
@@ -348,6 +395,12 @@ $("#msgform").addEventListener("submit", async (ev) => {
     await load();
   } catch (e) { toast(e.message, true); }
 });
+$("#timerform").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try { await api("POST", "/api/timer", { minutes: Number($("#timer-min").value), label: $("#timer-label").value }); toast("Timer started"); await load(); }
+  catch (e) { toast(e.message, true); }
+});
+$("#timer-clear").addEventListener("click", async () => { try { await api("DELETE", "/api/timer"); await load(); } catch (e) { toast(e.message, true); } });
 $("#msg-clear").addEventListener("click", async () => { try { await api("DELETE", "/api/message"); await load(); } catch (e) { toast(e.message, true); } });
 $("#config-save").addEventListener("click", async () => {
   try {

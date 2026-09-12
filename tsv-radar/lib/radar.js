@@ -5,7 +5,7 @@ import ftp from "basic-ftp";
 import sharp from "sharp";
 import fs from "fs";
 import { PassThrough } from "node:stream";
-import { rgbaToRgb565BE } from "./pixel.js";
+import { rgbaToRgb565BE, Canvas } from "./pixel.js";
 
 const PRODUCT_ID = process.env.PRODUCT_ID || "IDR1064";
 const NUM_FRAMES = Number(process.env.NUM_FRAMES || 6);
@@ -85,54 +85,16 @@ function remapRadarPaletteInPlace(rgba) {
   }
 }
 
-const TS_FONT = {
-  0: [0x3e, 0x51, 0x49, 0x45, 0x3e],
-  1: [0x00, 0x42, 0x7f, 0x40, 0x00],
-  2: [0x42, 0x61, 0x51, 0x49, 0x46],
-  3: [0x21, 0x41, 0x45, 0x4b, 0x31],
-  4: [0x18, 0x14, 0x12, 0x7f, 0x10],
-  5: [0x27, 0x45, 0x45, 0x45, 0x39],
-  6: [0x3c, 0x4a, 0x49, 0x49, 0x30],
-  7: [0x01, 0x71, 0x09, 0x05, 0x03],
-  8: [0x36, 0x49, 0x49, 0x49, 0x36],
-  9: [0x06, 0x49, 0x49, 0x29, 0x1e],
-  ":": [0x00, 0x36, 0x36, 0x00, 0x00],
-};
-
-function drawTimestampRGBA(buffer, width, height, text, fg = [255, 255, 0]) {
-  let x = width - text.length * 6 - 2;
-  const y = 2;
-  const boxW = text.length * 6 - 1;
-  const boxH = 9;
-  for (let by = y - 1; by < y - 1 + boxH; by++) {
-    if (by < 0 || by >= height) continue;
-    for (let bx = x - 1; bx < x - 1 + boxW + 2; bx++) {
-      if (bx < 0 || bx >= width) continue;
-      const i = (by * width + bx) * 4;
-      buffer[i] = 0;
-      buffer[i + 1] = 0;
-      buffer[i + 2] = 0;
-      buffer[i + 3] = 255;
-    }
-  }
-  for (const ch of text) {
-    const glyph = TS_FONT[ch];
-    if (glyph) {
-      glyph.forEach((col, cx) => {
-        for (let cy = 0; cy < 7; cy++) {
-          if (!(col & (1 << cy))) continue;
-          const px = x + cx;
-          const py = y + cy;
-          if (px < 0 || py < 0 || px >= width || py >= height) continue;
-          const i = (py * width + px) * 4;
-          buffer[i] = fg[0];
-          buffer[i + 1] = fg[1];
-          buffer[i + 2] = fg[2];
-          buffer[i + 3] = 255;
-        }
-      });
-    }
-    x += 6;
+function drawTimestampRGBA(buffer, width, height, text) {
+  // bold 5x8 glyphs (2 px strokes) in a black box, top-right
+  const cv = new Canvas(width, height);
+  const w = Canvas.measure(text) + 4;
+  const x = width - w - 1;
+  cv.rect(x, 1, w, 12, [0, 0, 0]);
+  cv.text(x + 2, 3, text, [255, 221, 0]);
+  for (let py = 1; py < 13; py++) for (let px = x; px < x + w; px++) {
+    const i = (py * width + px) * 4, j = i;
+    buffer[i] = cv.data[j]; buffer[i + 1] = cv.data[j + 1]; buffer[i + 2] = cv.data[j + 2]; buffer[i + 3] = 255;
   }
 }
 
@@ -186,6 +148,18 @@ async function loadBackground(size) {
   if (bgCache && bgCache.size === size) return bgCache.data;
   const bg = await sharp(BACKGROUND_PATH).resize(size, size).ensureAlpha().raw().toBuffer();
   tintCoastlineRedInPlace(bg);
+  // thicken the coastline to 2 px (dilate right and down)
+  const src = Buffer.from(bg);
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const i = (y * size + x) * 4;
+    if (src[i] < 40) continue;
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1]]) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= size || yy >= size) continue;
+      const j = (yy * size + xx) * 4;
+      if (bg[j] < src[i]) { bg[j] = src[i]; bg[j + 1] = 0; bg[j + 2] = 0; bg[j + 3] = 255; }
+    }
+  }
   bgCache = { size, data: bg };
   return bg;
 }

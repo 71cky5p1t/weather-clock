@@ -94,18 +94,18 @@ function compass(bearing) {
 
 export function renderPlanesFrame(site, d, highlightIdx, size = 64) {
   const cv = new Canvas(size, size);
-  const cx = 32, cy = 30, R = 20;
+  const cx = 32, cy = 29, R = 15;
 
   // header
-  cv.text(1, 1, site.label, C.grey, { font: "3x5" });
-  cv.textRight(62, 1, String(d.airborne), C.yellow, { font: "3x5" });
-  cv.hline(0, 7, size, C.dim);
+  cv.text(1, 1, site.label.slice(0, 8), C.grey);
+  cv.textRight(63, 1, String(d.airborne), C.yellow);
+  cv.hline(0, 10, size, C.dim);
 
-  // scope
-  cv.circle(cx, cy, R, C.dim);
-  cv.circle(cx, cy, Math.round(R / 2), [30, 30, 36]);
-  cv.set(cx, cy - R - 1, C.grey); // north tick
-  cv.rect(cx - 1, cy - 1, 2, 2, C.yellow); // home
+  // scope: two 2 px rings, north tick, home
+  cv.ring(cx, cy, R, C.dim, 2);
+  cv.ring(cx, cy, Math.round(R / 2), [30, 30, 36], 2);
+  cv.rect(cx - 1, cy - R - 2, 2, 2, C.grey);
+  cv.rect(cx - 1, cy - 1, 2, 2, C.yellow);
 
   const kmPerPx = (site.radiusNm * 1.852) / R;
   d.planes.forEach((p, i) => {
@@ -116,33 +116,33 @@ export function renderPlanesFrame(site, d, highlightIdx, size = 64) {
     const colour = p.onGround ? C.grey : hi ? C.white : C.red;
     if (hi && p.track != null) {
       const rad = (p.track * Math.PI) / 180;
-      cv.line(px, py, px + Math.round(Math.sin(rad) * 4), py - Math.round(Math.cos(rad) * 4), C.sky);
+      cv.line(px, py, px + Math.round(Math.sin(rad) * 6), py - Math.round(Math.cos(rad) * 6), C.sky, 2);
     }
-    cv.rect(px - (hi ? 1 : 0), py - (hi ? 1 : 0), hi ? 3 : 2, hi ? 3 : 2, colour);
+    if (hi) cv.rect(px - 2, py - 2, 4, 4, colour); else cv.rect(px - 1, py - 1, 2, 2, colour);
   });
 
   // callout for the highlighted plane
-  cv.hline(0, 51, size, C.dim);
+  cv.hline(0, 45, size, C.dim);
   const p = d.planes[highlightIdx];
   if (!p) {
-    cv.textCentered(55, "NO TRAFFIC", C.grey, { font: "3x5" });
+    cv.textCentered(51, "NO TRAFFIC", C.grey);
     return cv;
   }
-  cv.text(1, 53, p.callsign.slice(0, 8), C.white, { font: "3x5" });
-  cv.textRight(62, 53, `${Math.round(p.distKm)}KM ${compass(p.bearing)}`, C.grey, { font: "3x5" });
-  cv.text(1, 59, (p.type || "????").slice(0, 4), C.cyan, { font: "3x5" });
-  cv.textRight(62, 59, fmtAlt(p), p.onGround ? C.grey : C.yellow, { font: "3x5" });
+  cv.text(1, 47, p.callsign.slice(0, 6), C.white);
+  cv.textRight(63, 47, `${Math.min(999, Math.round(p.distKm))}KM`, C.grey);
+  cv.text(1, 56, (p.type || "????").slice(0, 4), C.cyan);
+  cv.textRight(63, 56, fmtAlt(p), p.onGround ? C.grey : C.yellow);
   return cv;
 }
 
 export function renderPlanesError(site, msg, size = 64) {
   const cv = new Canvas(size, size);
-  cv.text(1, 1, site.label, C.grey, { font: "3x5" });
-  cv.hline(0, 7, size, C.dim);
-  cv.circle(32, 30, 20, C.dim);
-  cv.rect(31, 29, 2, 2, C.yellow);
-  cv.hline(0, 51, size, C.dim);
-  cv.textCentered(55, "NO DATA", C.grey, { font: "3x5" });
+  cv.text(1, 1, site.label.slice(0, 8), C.grey);
+  cv.hline(0, 10, size, C.dim);
+  cv.ring(32, 29, 15, C.dim, 2);
+  cv.rect(31, 28, 2, 2, C.yellow);
+  cv.hline(0, 45, size, C.dim);
+  cv.textCentered(51, "NO DATA", C.grey);
   return cv;
 }
 

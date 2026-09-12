@@ -22,10 +22,10 @@ export function renderDateCard({ day, month, weekday }, size = 64) {
   drawDigitsRow(cv, digits, 0, 32, size, [pal.tl, pal.tr]);
 
   // month, big
-  cv.textCentered(37, month, C.white, { scale: 2 });
+  cv.textCentered(35, month, C.white, { scale: 2 });
 
   // weekday, small
-  cv.textCentered(56, weekday.slice(0, 15), C.grey, { font: "3x5" });
+  cv.textCentered(55, weekday.slice(0, 10), C.grey);
   return cv;
 }
 

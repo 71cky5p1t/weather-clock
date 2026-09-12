@@ -7,7 +7,7 @@ import path from "path";
 import { rgbaToRgb565BE } from "./pixel.js";
 
 const CONTENT_DIR = process.env.CONTENT_DIR || "/mnt/data/content";
-const MAX_CONTENT_FRAMES = Number(process.env.MAX_CONTENT_FRAMES || 12);
+const MAX_CONTENT_FRAMES = Number(process.env.MAX_CONTENT_FRAMES || 24);
 
 fs.mkdirSync(CONTENT_DIR, { recursive: true });
 
@@ -30,7 +30,7 @@ function coercePosInt(v, fallback) {
   return Math.round(n);
 }
 
-async function buildContentAsset(filePath, assetName, size) {
+export async function buildContentAsset(filePath, assetName, size) {
   const meta = await sharp(filePath, { animated: true }).metadata();
   const pages = Math.max(1, Number(meta.pages || 1));
   const delays = Array.isArray(meta.delay) ? meta.delay.map((d) => coercePosInt(d, 120)) : [coercePosInt(meta.delay, 120)];
@@ -42,9 +42,10 @@ async function buildContentAsset(filePath, assetName, size) {
   const frames = [];
   for (let k = 0; k < take; k++) {
     const i = Math.floor(k * step);
-    const rgba = await sharp(filePath, { animated: true })
-      .extractFrame(i)
+    // sharp selects one page of an animated image via `page` + `pages: 1`
+    const rgba = await sharp(filePath, { page: i, pages: 1 })
       .resize(size, size, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 1 } })
+      .flatten({ background: { r: 0, g: 0, b: 0 } })   // transparent -> black, not garbage
       .ensureAlpha()
       .raw()
       .toBuffer();

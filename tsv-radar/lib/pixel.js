@@ -159,6 +159,67 @@ const FONT_3X5 = {
   ",": [0, 0, 0, 2, 4],
 };
 
+
+// ── 5x8 BOLD font: every stroke is 2 px, so nothing on the panel is a single
+//    pixel wide. Rows top→bottom, 5 bits each, MSB = left. Advance 6 px.
+const FONT_BOLD = {
+  " ": [0, 0, 0, 0, 0, 0, 0, 0],
+  0: [31, 31, 27, 27, 27, 27, 31, 31],
+  1: [6, 14, 6, 6, 6, 6, 15, 15],
+  2: [31, 31, 3, 31, 31, 24, 31, 31],
+  3: [31, 31, 3, 15, 15, 3, 31, 31],
+  4: [27, 27, 27, 31, 31, 3, 3, 3],
+  5: [31, 31, 24, 31, 31, 3, 31, 31],
+  6: [31, 31, 24, 31, 31, 27, 31, 31],
+  7: [31, 31, 3, 3, 3, 3, 3, 3],
+  8: [31, 31, 27, 31, 31, 27, 31, 31],
+  9: [31, 31, 27, 31, 31, 3, 31, 31],
+  A: [14, 31, 27, 27, 31, 31, 27, 27],
+  B: [30, 31, 27, 30, 30, 27, 31, 30],
+  C: [31, 31, 24, 24, 24, 24, 31, 31],
+  D: [30, 31, 27, 27, 27, 27, 31, 30],
+  E: [31, 31, 24, 30, 30, 24, 31, 31],
+  F: [31, 31, 24, 30, 30, 24, 24, 24],
+  G: [31, 31, 24, 24, 27, 27, 31, 31],
+  H: [27, 27, 27, 31, 31, 27, 27, 27],
+  I: [31, 31, 12, 12, 12, 12, 31, 31],
+  J: [3, 3, 3, 3, 3, 27, 31, 31],
+  K: [27, 27, 30, 28, 28, 30, 27, 27],
+  L: [24, 24, 24, 24, 24, 24, 31, 31],
+  M: [27, 31, 31, 27, 27, 27, 27, 27],
+  N: [30, 31, 27, 27, 27, 27, 27, 27],
+  O: [31, 31, 27, 27, 27, 27, 31, 31],
+  P: [31, 31, 27, 31, 31, 24, 24, 24],
+  Q: [31, 31, 27, 27, 27, 31, 31, 3],
+  R: [31, 31, 27, 31, 31, 30, 27, 27],
+  S: [31, 31, 24, 31, 31, 3, 31, 31],
+  T: [31, 31, 12, 12, 12, 12, 12, 12],
+  U: [27, 27, 27, 27, 27, 27, 31, 31],
+  V: [27, 27, 27, 27, 27, 27, 31, 14],
+  W: [27, 27, 27, 27, 27, 31, 31, 27],
+  X: [27, 27, 31, 14, 14, 31, 27, 27],
+  Y: [27, 27, 27, 31, 31, 12, 12, 12],
+  Z: [31, 31, 3, 14, 14, 24, 31, 31],
+  ".": [0, 0, 0, 0, 0, 0, 12, 12],
+  ",": [0, 0, 0, 0, 0, 12, 12, 24],
+  ":": [0, 12, 12, 0, 0, 12, 12, 0],
+  "-": [0, 0, 0, 31, 31, 0, 0, 0],
+  "+": [0, 12, 12, 31, 31, 12, 12, 0],
+  "°": [14, 31, 27, 31, 14, 0, 0, 0],
+  "%": [25, 27, 3, 6, 12, 24, 27, 19],
+  "/": [3, 3, 6, 6, 12, 12, 24, 24],
+  "!": [12, 12, 12, 12, 12, 0, 12, 12],
+  "?": [31, 31, 3, 14, 12, 0, 12, 12],
+  "'": [12, 12, 0, 0, 0, 0, 0, 0],
+  "&": [14, 27, 30, 12, 30, 27, 31, 15],
+  "(": [6, 12, 24, 24, 24, 24, 12, 6],
+  ")": [12, 6, 3, 3, 3, 3, 6, 12],
+  "^": [4, 14, 27, 0, 0, 0, 0, 0],
+  v: [0, 0, 0, 0, 0, 27, 14, 4],
+  "=": [0, 0, 31, 31, 0, 31, 31, 0],
+  "*": [0, 27, 14, 31, 14, 27, 0, 0],
+};
+
 // ── Colours ───────────────────────────────────────────────────────
 export const C = {
   black: [0, 0, 0],
@@ -211,12 +272,25 @@ export class Canvas {
     for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) this.set(xx, yy, rgb);
   }
 
+  // Rules are always 2 px: single-pixel lines look thin and broken on the panel.
   hline(x, y, w, rgb) {
-    this.rect(x, y, w, 1, rgb);
+    this.rect(x, y, w, 2, rgb);
   }
 
   vline(x, y, h, rgb) {
-    this.rect(x, y, 1, h, rgb);
+    this.rect(x, y, 2, h, rgb);
+  }
+
+  ring(cx, cy, r, rgb, thickness = 2) {
+    for (let k = 0; k < thickness; k++) this.circle(cx, cy, r - k, rgb);
+  }
+
+  // filled disc
+  disc(cx, cy, r, rgb) {
+    for (let y = -r; y <= r; y++) {
+      const half = Math.floor(Math.sqrt(r * r - y * y));
+      this.rect(cx - half, cy + y, 2 * half + 1, 1, rgb);
+    }
   }
 
   circle(cx, cy, r, rgb) {
@@ -233,7 +307,13 @@ export class Canvas {
     }
   }
 
-  line(x0, y0, x1, y1, rgb) {
+  line(x0, y0, x1, y1, rgb, thick = 2) {
+    if (thick >= 2) {
+      this.line(x0, y0, x1, y1, rgb, 1);
+      const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+      if (dx >= dy) this.line(x0, y0 + 1, x1, y1 + 1, rgb, 1); else this.line(x0 + 1, y0, x1 + 1, y1, rgb, 1);
+      return;
+    }
     x0 |= 0; y0 |= 0; x1 |= 0; y1 |= 0;
     const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0);
     const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
@@ -248,11 +328,11 @@ export class Canvas {
   }
 
   // 7-segment digit in a w×h cell — same geometry as the firmware's clock.
-  sevenSeg(x, y, w, h, digit, rgb) {
+  sevenSeg(x, y, w, h, digit, rgb, strokeOverride = 0) {
     const MASK = [0b0111111, 0b0000110, 0b1011011, 0b1001111, 0b1100110, 0b1101101, 0b1111101, 0b0000111, 0b1111111, 0b1101111];
     const mask = digit === "-" ? 0b1000000 : MASK[Number(digit)] ?? 0;
     const m = Math.max(1, Math.floor(w / 10));
-    const t = Math.max(2, Math.floor(Math.min(w, h) / 7));
+    const t = strokeOverride || Math.max(2, Math.floor(Math.min(w, h) / 7));
     const x0 = x + m, x1 = x + w - m, y0 = y + m, y1 = y + h - m;
     const mid = Math.floor((y0 + y1) / 2);
     const gOn = (mask & (1 << 6)) !== 0;
@@ -268,16 +348,29 @@ export class Canvas {
   }
 
   // ── text ──
-  static measure(text, { font = "5x7", scale = 1, spacing = 1 } = {}) {
+  static measure(text, { font = "bold", scale = 1, spacing = 1 } = {}) {
     const glyphW = font === "3x5" ? 3 : 5;
     const n = [...String(text)].length;
     if (n === 0) return 0;
     return (n * glyphW + (n - 1) * spacing) * scale;
   }
 
-  text(x, y, str, rgb, { font = "5x7", scale = 1, spacing = 1 } = {}) {
+  text(x, y, str, rgb, { font = "bold", scale = 1, spacing = 1 } = {}) {
     const chars = [...String(str)];
     let cx = x;
+    if (font === "bold") {
+      for (const ch of chars) {
+        const key = ch === "v" ? "v" : ch.toUpperCase();
+        const g = FONT_BOLD[key] || FONT_BOLD["?"];
+        for (let r = 0; r < 8; r++) {
+          for (let c = 0; c < 5; c++) {
+            if (g[r] & (1 << (4 - c))) this.rect(cx + c * scale, y + r * scale, scale, scale, rgb);
+          }
+        }
+        cx += (5 + spacing) * scale;
+      }
+      return cx;
+    }
     if (font === "3x5") {
       for (const ch of chars) {
         const g = FONT_3X5[ch.toUpperCase()] || FONT_3X5["?"];
@@ -411,51 +504,87 @@ const PAL = {
 
 const ICONS = {
   sun: [
-    ".......Y........",
-    "...Y...Y...Y....",
-    "....Y.....Y.....",
-    ".....YYYYY......",
-    "....YYYYYYY.....",
-    "...YYYYYYYYY....",
-    "YY.YYYYYYYYY.YY.",
-    "...YYYYYYYYY....",
-    "...YYYYYYYYY....",
-    "....YYYYYYY.....",
-    ".....YYYYY......",
-    "....Y.....Y.....",
-    "...Y...Y...Y....",
-    ".......Y........",
+    ".......YY.......",
+    ".......YY.......",
+    "..YY...YY...YY..",
+    "...YY.YYYY.YY...",
+    "....YYYYYYYY....",
+    ".....YYYYYY.....",
+    "YY..YYYYYYYY..YY",
+    "YY..YYYYYYYY..YY",
+    ".....YYYYYY.....",
+    "....YYYYYYYY....",
+    "...YY.YYYY.YY...",
+    "..YY...YY...YY..",
+    ".......YY.......",
+    ".......YY.......",
     "................",
     "................",
   ],
   sunShort: [
     "................",
-    ".......Y........",
-    "....Y.....Y.....",
-    ".....YYYYY......",
-    "....YYYYYYY.....",
-    "...YYYYYYYYY....",
-    ".Y.YYYYYYYYY.Y..",
-    "...YYYYYYYYY....",
-    "...YYYYYYYYY....",
-    "....YYYYYYY.....",
-    ".....YYYYY......",
-    "....Y.....Y.....",
-    ".......Y........",
+    "................",
+    ".......YY.......",
+    "...YY.YYYY.YY...",
+    "....YYYYYYYY....",
+    ".....YYYYYY.....",
+    "..YYYYYYYYYYYY..",
+    "..YYYYYYYYYYYY..",
+    ".....YYYYYY.....",
+    "....YYYYYYYY....",
+    "...YY.YYYY.YY...",
+    ".......YY.......",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
+  partly: [
+    "....YY..........",
+    ".YY.YY.YY.......",
+    "..YYYYYY........",
+    "YYYYYYYYYY......",
+    "YYYYYYYYYY......",
+    "..YYYYYY.WWWW...",
+    ".YY.YY..WWWWWWW.",
+    "....YY.WWWWWWWWW",
+    "......WWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    ".....WWWWWWWWWW.",
     "................",
     "................",
     "................",
   ],
   partlyShort: [
     "................",
-    "....Y..Y........",
-    "..YYYYY.........",
-    ".YYYYYY.Y.......",
-    "..YYYYY..WWW....",
-    "....YYY.WWWWW...",
-    "....Y..WWWWWWWW.",
+    "....YY..........",
+    "..YYYYYY........",
+    ".YYYYYYYY.......",
+    ".YYYYYYYY.......",
+    "..YYYYYY.WWWW...",
+    "....YY..WWWWWWW.",
+    ".......WWWWWWWWW",
     "......WWWWWWWWWW",
-    ".....WWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    "....WWWWWWWWWWWW",
+    ".....WWWWWWWWWW.",
+    "................",
+    "................",
+    "................",
+  ],
+  partlyNight: [
+    ".MMM............",
+    ".MMMM...........",
+    "..MMMM..........",
+    "..MMMMM.........",
+    "...MMMMMMWWWW...",
+    "....MMMMWWWWWWW.",
+    ".......WWWWWWWWW",
+    "......WWWWWWWWWW",
+    "....WWWWWWWWWWWW",
     "....WWWWWWWWWWWW",
     "....WWWWWWWWWWWW",
     ".....WWWWWWWWWW.",
@@ -466,53 +595,17 @@ const ICONS = {
   ],
   moon: [
     "................",
-    "......MMM.......",
-    ".....MMM........",
-    "....MMM.........",
+    ".....MMMM.......",
+    "....MMMM........",
     "...MMMM.........",
-    "...MMMM.........",
-    "...MMMM.........",
-    "...MMMMM........",
-    "....MMMMM.......",
-    ".....MMMMMM..M..",
-    "......MMMMMMMM..",
-    "........MMMM....",
-    "................",
-    "................",
-    "................",
-    "................",
-  ],
-  partly: [
-    "....Y...........",
-    ".Y..Y..Y........",
-    "..YYYYY.........",
-    "Y.YYYYY.Y.......",
-    "..YYYYY..WWW....",
-    ".Y.YYY..WWWWW...",
-    "....Y..WWWWWWWW.",
-    "......WWWWWWWWWW",
-    ".....WWWWWWWWWWW",
-    "....WWWWWWWWWWWW",
-    "....WWWWWWWWWWWW",
-    ".....WWWWWWWWWW.",
-    "................",
-    "................",
-    "................",
-    "................",
-  ],
-  partlyNight: [
-    "..MM............",
-    "..MMM...........",
-    "..MMM...........",
-    "..MMMM..........",
-    "...MMMMM.WWW....",
-    "....MMM.WWWWW...",
-    ".......WWWWWWWW.",
-    "......WWWWWWWWWW",
-    ".....WWWWWWWWWWW",
-    "....WWWWWWWWWWWW",
-    "....WWWWWWWWWWWW",
-    ".....WWWWWWWWWW.",
+    "..MMMMM.........",
+    "..MMMMM.........",
+    "..MMMMM.........",
+    "..MMMMMM........",
+    "...MMMMMM.......",
+    "....MMMMMMM..MM.",
+    ".....MMMMMMMMMM.",
+    ".......MMMMMM...",
     "................",
     "................",
     "................",
@@ -563,14 +656,14 @@ const ICONS = {
     "GGGGGGGGGGGGGGGG",
     ".GGGGGGGGGGGGGG.",
     "................",
-    "..B...B...B.....",
-    "..B...B...B..B..",
-    ".....B...B...B..",
-    "..B..B..B...B...",
-    "..B.....B..B....",
-    ".....B.....B....",
+    "..BB...BB...BB..",
+    "..BB...BB...BB..",
     "................",
+    ".....BB...BB....",
+    ".....BB...BB....",
     "................",
+    "..BB...BB...BB..",
+    "..BB...BB...BB..",
   ],
   drizzle: [
     "................",
@@ -581,14 +674,14 @@ const ICONS = {
     "WWWWWWWWWWWWWWW.",
     ".WWWWWWWWWWWWWW.",
     "................",
-    "...B....B....B..",
+    "...BB....BB.....",
+    "...BB....BB.....",
     "................",
-    "......B....B....",
+    "........BB....BB",
+    "........BB....BB",
     "................",
-    "...B....B....B..",
-    "................",
-    "................",
-    "................",
+    "...BB....BB.....",
+    "...BB....BB.....",
   ],
   storm: [
     "......GGGG......",
@@ -598,32 +691,32 @@ const ICONS = {
     "GGGGGGGGGGGGGGG.",
     "GGGGGGGGGGGGGGGG",
     ".GGGGGGGGGGGGGG.",
-    ".......LL.......",
-    "..B...LL..B.....",
-    "..B..LLLL.B..B..",
-    "......LL.....B..",
-    "..B..LL.B...B...",
-    ".....L..B..B....",
-    "................",
-    "................",
-    "................",
+    "......LLL.......",
+    "..BB.LLL..BB....",
+    "..BB.LLLLL.BB...",
+    "......LLL.......",
+    "....BBLL.BB.....",
+    "....BBLL.BB.....",
+    "......L.........",
+    "..BB.....BB.....",
+    "..BB.....BB.....",
   ],
   fog: [
     "................",
-    "................",
+    "..FFFFFFFFFF....",
     "..FFFFFFFFFF....",
     "................",
     "....FFFFFFFFFFF.",
+    "....FFFFFFFFFFF.",
     "................",
+    ".FFFFFFFFFFF....",
     ".FFFFFFFFFFF....",
     "................",
     "....FFFFFFFFFF..",
+    "....FFFFFFFFFF..",
     "................",
-    "..FFFFFFFFFFFF..",
-    "................",
-    ".....FFFFFFFF...",
-    "................",
-    "................",
+    "..FFFFFFFF......",
+    "..FFFFFFFF......",
     "................",
   ],
   snow: [
@@ -634,31 +727,31 @@ const ICONS = {
     "WWWWWWWWWWWWWWW.",
     ".WWWWWWWWWWWWWW.",
     "................",
-    "..S.....S.....S.",
-    ".SSS...SSS...SSS",
-    "..S.....S.....S.",
+    "..SS....SS....SS",
+    "..SS....SS....SS",
     "................",
-    ".....S.....S....",
-    "....SSS...SSS...",
-    ".....S.....S....",
+    ".....SS....SS...",
+    ".....SS....SS...",
     "................",
+    "..SS....SS....SS",
+    "..SS....SS....SS",
     "................",
   ],
   unknown: [
     "................",
-    ".....GGGGGG.....",
-    "....GG....GG....",
-    "....GG....GG....",
-    "..........GG....",
-    ".........GG.....",
-    "........GG......",
-    ".......GG.......",
-    ".......GG.......",
-    ".......GG.......",
+    "....GGGGGGGG....",
+    "...GGGGGGGGGG...",
+    "...GGG....GGG...",
+    "..........GGG...",
+    "........GGGG....",
+    ".......GGGG.....",
+    "......GGG.......",
+    "......GGG.......",
+    "......GGG.......",
     "................",
-    ".......GG.......",
-    ".......GG.......",
     "................",
+    "......GGG.......",
+    "......GGG.......",
     "................",
     "................",
   ],
@@ -743,16 +836,17 @@ export function drawIcon(canvas, name, x, y, size = 16, phase = 0) {
 // Map a WMO weather code (Open-Meteo) to an icon name + label.
 export function wmoToIcon(code, isDay = true) {
   const n = Number(code);
+  // labels are at most 10 characters: that is one line of the bold font
   if (n === 0) return { icon: isDay ? "sun" : "moon", label: "Clear" };
-  if (n === 1) return { icon: isDay ? "sun" : "moon", label: "Mostly clear" };
-  if (n === 2) return { icon: isDay ? "partly" : "partlyNight", label: "Partly cloudy" };
+  if (n === 1) return { icon: isDay ? "sun" : "moon", label: "Fair" };
+  if (n === 2) return { icon: isDay ? "partly" : "partlyNight", label: "Partly cld" };
   if (n === 3) return { icon: "overcast", label: "Overcast" };
   if (n === 45 || n === 48) return { icon: "fog", label: "Fog" };
   if (n >= 51 && n <= 57) return { icon: "drizzle", label: "Drizzle" };
   if (n >= 61 && n <= 67) return { icon: "rain", label: n >= 65 ? "Heavy rain" : "Rain" };
   if (n >= 71 && n <= 77) return { icon: "snow", label: "Snow" };
   if (n >= 80 && n <= 82) return { icon: "rain", label: "Showers" };
-  if (n === 85 || n === 86) return { icon: "snow", label: "Snow showers" };
+  if (n === 85 || n === 86) return { icon: "snow", label: "Snow shwrs" };
   if (n >= 95) return { icon: "storm", label: "Storms" };
   return { icon: "unknown", label: "Unknown" };
 }

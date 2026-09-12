@@ -118,52 +118,47 @@ export function renderTodayCard(d, size = 64, phase = 0) {
   const today = d.days[0] || {};
 
   // header: condition (the date has its own page)
-  cv.textCentered(1, d.label.toUpperCase().slice(0, 15), C.white, { font: "3x5" });
-  cv.hline(0, 7, size, C.dim);
+  cv.textCentered(1, d.label.toUpperCase().slice(0, 10), C.white);
+  cv.hline(0, 10, size, C.dim);
 
-  // big 7-seg temperature
+  // big 7-seg temperature (4 px stroke) + degree ring
   const t = d.temp == null ? null : Math.round(d.temp);
   const tc = tempColour(d.temp);
   const digits = t == null ? "--" : String(Math.abs(t));
-  const dw = 14, dh = 22, gap = 2, y0 = 10;
-  const totalW = digits.length * dw + (digits.length - 1) * gap + 5;
-  let x = Math.max(1, Math.floor((42 - totalW) / 2));
-  if (t != null && t < 0) { cv.rect(x, y0 + Math.floor(dh / 2) - 1, 5, 2, tc); x += 6; }
-  for (const ch of digits) {
-    cv.sevenSeg(x, y0, dw, dh, ch === "-" ? "-" : ch, tc);
-    x += dw + gap;
-  }
-  cv.circle(x + 1, y0 + 2, 1, tc); // degree ring
+  const dw = 16, dh = 24, gap = 2, y0 = 14;
+  let x = 2;
+  if (t != null && t < 0) { cv.rect(x, y0 + 11, 6, 2, tc); x += 8; }
+  for (const ch of digits) { cv.sevenSeg(x, y0, dw, dh, ch === "-" ? "-" : ch, tc, 4); x += dw + gap; }
+  cv.ring(x + 2, y0 + 2, 2, tc, 1);
+  cv.ring(x + 2, y0 + 2, 3, tc, 1);
 
   // icon
-  drawIcon(cv, d.icon, 46, 12, 16, phase);
+  drawIcon(cv, d.icon, 46, 16, 16, phase);
 
-  // three columns: LO | RAIN | HI. Coloured accent bar + coloured text on
-  // black (solid blocks with black text were hard to read on the panel).
+  cv.hline(0, 40, size, C.dim);
+
+  // LO | RAIN | HI: coloured accent bar, grey label, coloured value
   const cols = [
-    { x: 0, colour: C.sky, label: "LO", value: `${fmtTemp(today.lo)}°` },
-    { x: 21, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
-    { x: 43, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
+    { x: 0, w: 17, colour: C.sky, label: "LO", value: `${fmtTemp(today.lo)}°` },
+    { x: 20, w: 25, colour: C.yellow, label: "RAIN", value: `${d.rainToday ?? "--"}%` },
+    { x: 47, w: 17, colour: C.red, label: "HI", value: `${fmtTemp(today.hi)}°` },
   ];
-  cv.hline(0, 38, size, C.dim);
+  cv.vline(18, 43, 21, C.dim);
+  cv.vline(45, 43, 21, C.dim);
   for (const c of cols) {
-    const w = 21;
-    cv.rect(c.x + 2, 42, w - 4, 2, c.colour);
-    cv.text(c.x + Math.floor((w - Canvas.measure(c.label, { font: "3x5" })) / 2), 47, c.label, C.grey, { font: "3x5" });
-    cv.text(c.x + Math.floor((w - Canvas.measure(c.value)) / 2), 55, c.value, c.colour);
+    cv.rect(c.x + 1, 43, c.w - 2, 2, c.colour);
+    cv.text(c.x + Math.floor((c.w - Canvas.measure(c.label)) / 2), 47, c.label, C.grey);
+    cv.text(c.x + Math.floor((c.w - Canvas.measure(c.value)) / 2), 56, c.value, c.colour);
   }
-  cv.vline(21, 42, 21, C.dim);
-  cv.vline(42, 42, 21, C.dim);
   return cv;
 }
 
 export function renderErrorCard(msg, size = 64) {
   const cv = new Canvas(size, size);
-  drawIcon(cv, "unknown", 24, 8, 16);
-  cv.textCentered(30, "WEATHER", C.grey, { font: "3x5" });
-  cv.textCentered(37, "UNAVAILABLE", C.grey, { font: "3x5" });
-  const lines = Canvas.wrap(String(msg || "").slice(0, 60), size - 4, { font: "3x5" }).slice(0, 2);
-  lines.forEach((l, i) => cv.textCentered(48 + i * 7, l, C.dim, { font: "3x5" }));
+  drawIcon(cv, "unknown", 24, 6, 16);
+  cv.textCentered(28, "WEATHER", C.grey);
+  cv.textCentered(38, "OFFLINE", C.grey);
+  cv.hline(20, 50, 24, C.dim);
   return cv;
 }
 

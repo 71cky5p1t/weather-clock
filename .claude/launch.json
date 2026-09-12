@@ -4,9 +4,13 @@
     {
       "name": "weather-clock-server",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "tsv-radar",
-      "port": 8787
+      "port": 8787,
+      "autoPort": true
     }
   ]
 }

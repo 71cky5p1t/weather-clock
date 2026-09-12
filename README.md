@@ -1,6 +1,6 @@
 # Weather Clock
 
-A 64×64 HUB75 LED matrix (ESP32-S3 Matrix Portal) that shows a Mondrian clock, the local BoM rain radar, live weather, rotating quotes and messages you send from your phone. A small Node server does all the heavy lifting; the display just plays a playlist of ready-made frames.
+A 64×64 HUB75 LED matrix (ESP32-S3 Matrix Portal) that shows a Mondrian clock, the local BoM rain radar, live weather, rotating quotes and messages you send from your phone. A small Node server does all the heavy lifting; the display just plays a playlist of ready-made frames. Everything on the panel uses 2 px strokes minimum (a bold 5×8 pixel font, 2 px rules and rings) because single pixels look thin and broken on an LED matrix.
 
 ```
 ┌──────────────┐   /api/manifest   ┌──────────────────────┐
@@ -77,9 +77,17 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 }
 ```
 
-- `RADAR` – BoM loop. Shown only when rain is around: forecast chance ≥ `rainChanceMin` (default 30%) in the next 12 h, or rain echoes on the latest scan, or it's raining now. Set `"onlyWhenRain": false` to always show it. `WEATHER` – today card (7-seg temperature, animated icon, LO / RAIN / HI columns). `DATE` – day in the clock's digits over the month name. `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` per page so a device somewhere else can watch its own sky. `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension). `CLOCK` – rendered on the device.
+- `RADAR` – BoM loop, shown only when rain is around (forecast chance ≥ `rainChanceMin`, default 30%, or echoes on the latest scan). Frames morph into each other on the device. `"onlyWhenRain": false` forces it on.
+- `CLOCK` – rendered on the device (Flux layout, interlocking stems, seconds wipe, minute-tick morph).
+- `WEATHER` – today card: condition, 7-seg temperature, animated icon (phases morph on the device), LO / RAIN / HI.
+- `DATE` – day in the clock's digits over the month; `MOON` – phase with the real terminator (southern-hemisphere orientation), illumination, days to full/new; `SUN` – sunrise-to-sunset arc with the sun (or moon) at its current position.
+- `PLANES` – aircraft overhead via adsb.lol; optional `lat`, `lon`, `radiusNm`, `label` so another device can watch its own sky.
+- `MONDRIAN` – a fresh random composition per visit, blocks animating in.
+- `COUNTDOWN` – `label` (≤ 10 chars), `date` (YYYY-MM-DD), optional `yearly`; days remaining in the clock's digits.
+- `GIF` – a random GIF from `tsv-radar/content/gifs/` (`loops`). GIFs are scored on how dark their border is and light-background ones are rejected so nothing glares. Set `GIPHY_API_KEY` in `.env` to auto-fetch pixel-art GIFs into the mix (`GIPHY_QUERIES` picks the searches).
+- `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension).
+- Messages sent from the dashboard are injected into the playlist for the chosen number of minutes. A **timer** started from the dashboard takes over the whole display (minutes over seconds in the clock's digits, red flash when done) until it clears.
 - Add `"enabled": false` to park a page. Per-device overrides go under `devices.<deviceId>`.
-- Messages sent from the dashboard are injected into the playlist automatically for the chosen number of minutes.
 - The server skips pages whose data isn't available yet (e.g. radar before the first BoM fetch) and the dashboard tells you why.
 
 ### API the firmware uses

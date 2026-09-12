@@ -12,8 +12,11 @@ export const GEOMETRY = {
   oneStyle: "centered", // "centered" bar for 1s, or "seg" for classic right-side 1
   leadingZero: 0,    // 1 = always two hour digits (09:41), 0 = single digit spans the row (Flux)
   quirk: 1,          // 1 = interlocking stems: last hour digit 4/7/1 drops through the minute
-                     //     row, first minute digit 4/1 rises through the hour row; rows squeeze
+                     //     row, first minute digit 4 rises through the hour row; rows squeeze
+  oneRises: 0,       // 1 = a minute-tens "1" also rises through the hour row. Off by default:
+                     //     the free-standing bar reads as a leading hour digit (04:10 looks like 14:10)
   stemGap: 3,        // px between an extended stem and the squeezed row
+  minHole: 3,        // px of daylight a squeezed digit must keep between its stems, else no squeeze
 };
 
 export const PALETTE = {
@@ -93,7 +96,17 @@ export function stemX(cell, g, side) {
   return null;
 }
 
+// A squeezed row is only allowed if every digit stays legible: a wide digit keeps
+// daylight between its stems, a centred 1 keeps clear space beside its bar.
+export function rowLegible(cells, g) {
+  return cells.every((c) => (c.d === 1 && g.oneStyle === "centered")
+    ? c.w >= g.stroke + 4
+    : c.w - 2 * g.marginX >= 2 * g.stroke + g.minHole);
+}
+
 // Compute the full layout for a time (cells + stems), without drawing.
+// Stems only extend when the row they squeeze stays readable, so 1:00 keeps
+// its minutes (a lone hour "1" would otherwise crush them into blocks).
 export function layoutClock(hh, mm, size, geometry = {}) {
   const g = { ...GEOMETRY, ...geometry };
   const hours = hh < 10 && !g.leadingZero ? [hh] : [Math.floor(hh / 10), hh % 10];
@@ -102,15 +115,24 @@ export function layoutClock(hh, mm, size, geometry = {}) {
   let mcells = layoutRow(minutes, g, 0, size);
   let descX = null, ascX = null;
   if (g.quirk) {
-    descX = stemX(hcells[hcells.length - 1], g, "right");
-    ascX = stemX(mcells[0], g, "left");
+    const lastH = hcells[hcells.length - 1], firstM = mcells[0];
+    let wantDesc = stemX(lastH, g, "right") != null;
+    let wantAsc = stemX(firstM, g, "left") != null && (firstM.d !== 1 || g.oneRises);
     // two extended 1s dissolve the rows into bars: extend neither
-    if (hcells[hcells.length - 1].d === 1 && mcells[0].d === 1) { descX = null; ascX = null; }
+    if (lastH.d === 1 && firstM.d === 1) { wantDesc = false; wantAsc = false; }
+    // the rising stem sits at the row's left edge, so it is fixed; squeeze the hour row first
+    if (wantAsc) {
+      const x = stemX(firstM, g, "left");
+      const squeezed = layoutRow(hours, g, x + g.stroke + g.stemGap, size);
+      if (rowLegible(squeezed, g)) { ascX = x; hcells = squeezed; }
+    }
+    // the dropping stem moves with the (possibly squeezed) hour row: measure it after
+    if (wantDesc) {
+      const x = stemX(hcells[hcells.length - 1], g, "right");
+      const squeezed = layoutRow(minutes, g, 0, x - g.stemGap);
+      if (rowLegible(squeezed, g)) { descX = x; mcells = squeezed; }
+    }
   }
-  const hx0 = ascX != null ? ascX + g.stroke + g.stemGap : 0;
-  const mx1 = descX != null ? descX - g.stemGap : size;
-  hcells = layoutRow(hours, g, hx0, size);
-  mcells = layoutRow(minutes, g, 0, mx1);
   return { g, hcells, mcells, descX, ascX };
 }
 
@@ -129,15 +151,10 @@ export function drawClock(cv, hh, mm, ss, size = 64, geometry = {}) {
   drawDigit(cv, mcells[1].d, mcells[1].x, rowH, mcells[1].w, rowH, cur.br, prev.br, yCut, g);
 
   if (descX != null) {
-    const last = hcells[hcells.length - 1];
-    const sx = stemX(last, g, "right");
     const [c0, c1] = hcells.length === 1 ? [cur.tl, prev.tl] : [cur.tr, prev.tr];
-    fillWipe(cv, sx, rowH - g.marginY, t, size - g.marginY - (rowH - g.marginY), c0, c1, yCut);
+    fillWipe(cv, descX, rowH - g.marginY, t, size - g.marginY - (rowH - g.marginY), c0, c1, yCut);
   }
-  if (ascX != null) {
-    const sx = stemX(mcells[0], g, "left");
-    fillWipe(cv, sx, g.marginY, t, rowH, cur.bl, prev.bl, yCut);
-  }
+  if (ascX != null) fillWipe(cv, ascX, g.marginY, t, rowH, cur.bl, prev.bl, yCut);
 }
 
 // Draw a row of digits with the clock's geometry (used by the date page).
@@ -172,6 +189,7 @@ export function quirkTimes() {
     [14, 41, 7], [17, 45, 20], [11, 11, 33], [21, 11, 45], [4, 41, 58], [12, 12, 5], [7, 17, 15], [14, 14, 25], [23, 59, 35], [10, 41, 45],
     [1, 14, 55], [19, 19, 2], [13, 37, 12], [9, 41, 22], [11, 17, 32], [21, 47, 42], [0, 10, 52], [16, 16, 3], [17, 7, 13], [4, 4, 23],
     [0, 44, 33], [22, 14, 43], [11, 41, 53], [7, 41, 4], [1, 1, 14], [21, 1, 24], [14, 10, 34], [15, 15, 44], [3, 17, 54], [11, 10, 6],
+    [1, 0, 0], [1, 20, 30], [1, 44, 40], [1, 59, 50], [11, 0, 15], [21, 0, 25], [4, 10, 35], [10, 10, 45],
   ];
 }
 

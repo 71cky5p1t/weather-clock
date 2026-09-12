@@ -150,7 +150,7 @@ static void fillRectWipe(int x, int y, int w, int h, uint16_t cTop, uint16_t cBo
   }
 }
 
-// Digit geometry — keep in sync with tsv-radar/lib/clock.js GEOMETRY.
+// Digit geometry — keep in sync with tsv-radar/lib/clock-core.js GEOMETRY.
 // Chosen from a 100-time contact-sheet review: uniform 6 px stroke, 2 px
 // margins, and a "1" drawn as a single centred bar.
 static const int DIGIT_MARGIN_X = 2;
@@ -194,11 +194,15 @@ static void drawDigitInCell(uint8_t d, int cx, int cy, int cw, int ch, uint16_t 
 // Flux-style layout: digits share the row width in proportion to how much
 // room they need. A "1" is narrow, everything else is wide, and a single-digit
 // hour stretches across the whole row.
-// Quirk (mirrors tsv-radar/lib/clock.js): the last hour digit, if it is a
+// Quirk (mirrors tsv-radar/lib/clock-core.js): the last hour digit, if it is a
 // 4/7/1, drops its right-hand stem through the minute row; the first minute
-// digit, if 4/1, raises its left stem through the hour row. Rows squeeze
-// sideways to make room.
-static const int STEM_GAP = 3;
+// digit, if 4 (or 1 with ONE_RISES), raises its left stem through the hour
+// row. Rows squeeze sideways to make room, but only while every digit in the
+// squeezed row stays legible (MIN_HOLE px between its stems) - otherwise a
+// lone hour "1" would crush 1:00's minutes into solid blocks.
+static const int  STEM_GAP  = 3;
+static const int  MIN_HOLE  = 3;
+static const bool ONE_RISES = false;   // a rising minute "1" reads as a leading hour digit (04:10 -> 14:10)
 
 static int digitWeight(int d) { return d == 1 ? 40 : 100; }
 
@@ -222,6 +226,16 @@ static int stemX(const Cell &c, bool rightSide) {
   return -1;
 }
 
+// A squeezed row is only allowed if every digit stays legible: a wide digit
+// keeps daylight between its stems, a centred 1 keeps clear space beside its bar.
+static bool rowLegible(const Cell *cells, int n) {
+  for (int i = 0; i < n; i++) {
+    if (cells[i].d == 1) { if (cells[i].w < DIGIT_STROKE + 4) return false; }
+    else if (cells[i].w - 2 * DIGIT_MARGIN_X < 2 * DIGIT_STROKE + MIN_HOLE) return false;
+  }
+  return true;
+}
+
 static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
   matrix.fillScreen(MONDRIAN_BLACK());
   const int rowH = HEIGHT / 2;
@@ -238,18 +252,28 @@ static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
   int md[2] = { mm / 10, mm % 10 };
   Cell hc[2], mc[2];
 
-  // pass 1: full-width layout to find the stems that will extend
+  // pass 1: full-width layout to find the stems that want to extend
   layoutRow(hd, hn, hc, 0, WIDTH);
   layoutRow(md, 2, mc, 0, WIDTH);
-  int descX = stemX(hc[hn - 1], true);
-  int ascX  = stemX(mc[0], false);
-  if (hc[hn - 1].d == 1 && mc[0].d == 1) { descX = -1; ascX = -1; }   // two tall 1s dissolve the rows
+  bool wantDesc = stemX(hc[hn - 1], true) >= 0;
+  bool wantAsc  = stemX(mc[0], false) >= 0 && (mc[0].d != 1 || ONE_RISES);
+  if (hc[hn - 1].d == 1 && mc[0].d == 1) { wantDesc = false; wantAsc = false; }   // two tall 1s dissolve the rows
 
-  // pass 2: squeeze each row away from the other's stem
-  int hx0 = (ascX >= 0) ? ascX + DIGIT_STROKE + STEM_GAP : 0;
-  int mx1 = (descX >= 0) ? descX - STEM_GAP : WIDTH;
-  layoutRow(hd, hn, hc, hx0, WIDTH);
-  layoutRow(md, 2, mc, 0, mx1);
+  // pass 2: squeeze each row away from the other's stem, but only if it stays legible.
+  // The rising stem sits at the row's left edge (fixed), so squeeze the hour row first;
+  // the dropping stem moves with the squeezed hour row, so measure it afterwards.
+  int descX = -1, ascX = -1;
+  Cell tmp[2];
+  if (wantAsc) {
+    int x = stemX(mc[0], false);
+    layoutRow(hd, hn, tmp, x + DIGIT_STROKE + STEM_GAP, WIDTH);
+    if (rowLegible(tmp, hn)) { ascX = x; hc[0] = tmp[0]; hc[1] = tmp[1]; }
+  }
+  if (wantDesc) {
+    int x = stemX(hc[hn - 1], true);
+    layoutRow(md, 2, tmp, 0, x - STEM_GAP);
+    if (rowLegible(tmp, 2)) { descX = x; mc[0] = tmp[0]; mc[1] = tmp[1]; }
+  }
 
   drawDigitInCell(hc[0].d, hc[0].x, 0, hc[0].w, rowH, TLc, TLp, yCut);
   if (hn == 2) drawDigitInCell(hc[1].d, hc[1].x, 0, hc[1].w, rowH, TRc, TRp, yCut);
@@ -258,14 +282,10 @@ static void drawClockDigits(int hh, int mm, int ss, bool /*colonOn*/) {
 
   // extensions through the other row
   if (descX >= 0) {
-    int sx = stemX(hc[hn - 1], true);
     uint16_t cc = (hn == 1) ? TLc : TRc, cp = (hn == 1) ? TLp : TRp;
-    fillRectWipe(sx, rowH - DIGIT_MARGIN_Y, DIGIT_STROKE, HEIGHT - rowH, cc, cp, yCut);
+    fillRectWipe(descX, rowH - DIGIT_MARGIN_Y, DIGIT_STROKE, HEIGHT - rowH, cc, cp, yCut);
   }
-  if (ascX >= 0) {
-    int sx = stemX(mc[0], false);
-    fillRectWipe(sx, DIGIT_MARGIN_Y, DIGIT_STROKE, rowH, BLc, BLp, yCut);
-  }
+  if (ascX >= 0) fillRectWipe(ascX, DIGIT_MARGIN_Y, DIGIT_STROKE, rowH, BLc, BLp, yCut);
 }
 
 // Draw the clock into the canvas at (scheduled brightness × alpha); no show().
@@ -285,6 +305,24 @@ static void drawClock(uint8_t alpha) {
 
 static void renderClock(uint8_t alpha);   // defined after the morph helpers
 
+
+// ── TIMER PAGE ───────────────────────────────────────────────────
+// Minutes over seconds in the clock's digits; wipe shows the current minute
+// draining. When it reaches zero the panel flashes red for a while.
+static void drawTimer(uint8_t alpha) {
+  BRIGHT = (uint8_t)((uint32_t)scheduledBright * alpha / 255);
+  time_t now = time(nullptr);
+  long remaining = (long)page().endsAt - (long)now;
+  if (remaining <= 0) {
+    bool on = (millis() / 500) % 2 == 0;
+    matrix.fillScreen(on ? col(227, 0, 15) : 0);
+    if (!on) drawClockDigits(0, 0, 59, false);
+    return;
+  }
+  int mm = min(99L, remaining / 60);
+  int ss = remaining % 60;
+  drawClockDigits(mm, ss, 59 - ss, false);
+}
 
 // ── STATUS SCREEN ────────────────────────────────────────────────
 static void showStatus(const char *l1, const char *l2 = nullptr, const char *l3 = nullptr, uint16_t colour = 0) {
@@ -602,6 +640,13 @@ static bool parseManifest(const String &json, Config &out) {
       pg.loops = max(1, (int)(p["loops"] | 1));
       pg.frameDelayMs = p["frameDelayMs"] | 450;
       pg.durationMs = p["durationMs"] | 0;
+      pg.holdMs = p["holdMs"] | 0;
+      pg.morph = p["morph"] | false;
+    } else if (!strcmp(type, "TIMER")) {
+      pg.type = PAGE_TIMER;
+      strlcpy(pg.name, "timer", sizeof(pg.name));
+      pg.endsAt = p["endsAt"] | 0;
+      pg.durationMs = 0;
     } else continue;
     out.pageCount++;
   }
@@ -713,6 +758,7 @@ static int      loopIdx = 0;
 static uint32_t tNextFrame = 0;
 static uint32_t curFrameDelay = 450;
 static bool     prefetchArmed = false;
+static bool     holdingLast = false;
 static uint8_t  pageFailStreak = 0;
 
 static inline Page &page() { return cfg.pages[curPage]; }
@@ -769,6 +815,7 @@ static void enterShow(uint32_t now) {
   loopIdx = 0;
   tNextFrame = now;
   prefetchArmed = false;
+  holdingLast = false;
 }
 
 static void startPage(int idx, uint32_t now) {
@@ -789,7 +836,7 @@ static void startPage(int idx, uint32_t now) {
       return;
     }
     curPool = p;
-    curFrameDelay = pg.frameDelayMs ? pg.frameDelayMs : pools[p].frameDelayMs;
+    curFrameDelay = pg.frameDelayMs ? pg.frameDelayMs : pools[p].frameDelayMs;   // 0 = use the asset's own timing
     if (curFrameDelay < 50) curFrameDelay = 450;
   } else {
     curPool = -1;
@@ -801,6 +848,7 @@ static void startPage(int idx, uint32_t now) {
 
 static void drawCurrent(uint8_t alpha, int frame) {
   if (page().type == PAGE_BITMAP && curPool >= 0) drawBitmap(pools[curPool], frame, alpha);
+  else if (page().type == PAGE_TIMER) drawTimer(alpha);
   else drawClock(alpha);
 }
 
@@ -905,6 +953,15 @@ void loop() {
     case PH_SHOW: {
       if (!prefetchArmed) armPrefetchForNext();
 
+      if (pg.type == PAGE_TIMER) {
+        drawTimer(255);
+        matrix.show();
+        maybePoll(now, false);
+        if (!singlePage() && now - tPhase >= 15000) beginTransition(nextPageIndex(curPage), now);
+        delay(CLOCK_TICK_MS);
+        break;
+      }
+
       if (isClock) {
         renderClock(255);
         maybePoll(now, false);                       // cheap moment to talk to the server
@@ -924,6 +981,13 @@ void loop() {
           loopIdx++;
           bool done = loopIdx >= pg.loops;
           if (pg.durationMs && now - tPhase >= pg.durationMs) done = true;
+          if (done && pg.holdMs && !holdingLast) {
+            // hold the finished composition before moving on
+            holdingLast = true;
+            frameIdx = pool.count - 1;
+            tNextFrame = now + pg.holdMs;
+            break;
+          }
           if (done) {
             if (singlePage()) {                        // single bitmap page: loop forever, refreshing
               loopIdx = 0;
@@ -933,6 +997,28 @@ void loop() {
             }
             else { beginTransition(nextPageIndex(curPage), now); break; }
           }
+        }
+        if (pg.morph && morphReady && frameIdx > 0 && pool.count > 1 && !holdingLast) {
+          // morph from the frame on screen into the next one
+          uint32_t ms = min((uint32_t)400, curFrameDelay * 2 / 3);
+          snapshotCanvas(snapA);
+          drawBitmap(pool, frameIdx, 255);
+          snapshotCanvas(snapB);
+          if (buildMorph()) {
+            uint32_t t0 = millis();
+            for (;;) {
+              uint32_t dt = millis() - t0;
+              if (dt >= ms) break;
+              drawMorph((int)(easeInOut(dt / (float)ms) * 256));
+              matrix.show();
+              delay(8);
+            }
+            matrix.drawRGBBitmap(0, 0, snapB, WIDTH, HEIGHT);
+          }
+          matrix.show();
+          frameIdx++;
+          tNextFrame = millis() + (curFrameDelay > ms ? curFrameDelay - ms : 50);
+          break;
         }
         renderBitmap(pool, frameIdx, 255);
         frameIdx++;

@@ -20,6 +20,8 @@ import { message, messageActive, setMessage, clearMessage } from "./lib/text.js"
 import { heartbeat, listDevices } from "./lib/devices.js";
 import { sites as planeSites, startPlanesScheduler } from "./lib/planes.js";
 import { renderClock, renderSheet, sampleTimes, GEOMETRY } from "./lib/clock.js";
+import { gifs, startGifScheduler, refreshGifs } from "./lib/gifs.js";
+import { setTimer, clearTimer, timerState } from "./lib/timer.js";
 import {
   manifestState,
   loadManifest,
@@ -66,6 +68,7 @@ startRadarScheduler(SIZE, REFRESH_SECONDS);
 startWeatherScheduler(SIZE);
 startContentScheduler(SIZE);
 startPlanesScheduler(SIZE);
+startGifScheduler(SIZE);
 setInterval(() => loadManifest(), 15 * 1000);
 
 // ── firmware-facing API ────────────────────────────────
@@ -190,6 +193,8 @@ app.get("/api/status", (req, res) => {
     contentDir: content.dir,
     quote: quote?.text || "",
     message: messageActive() ? { ...message, remainingS: Math.round((message.expiresAt - Date.now()) / 1000) } : null,
+    timer: timerState(),
+    gifs: { dir: gifs.dir, count: gifs.assets.size, giphy: gifs.giphy, lastError: gifs.lastError, rejected: gifs.rejected.slice(0, 10), assets: Array.from(gifs.assets.values()).map((g) => ({ name: g.name, file: g.file, count: g.frames.length, score: Number(g.score.toFixed(2)) })) },
     manifest,
     skipped,
     manifestPath: manifestState.path,
@@ -206,6 +211,21 @@ app.get("/api/weather", (req, res) => {
 });
 
 app.get("/api/devices", (req, res) => res.json(listDevices()));
+
+app.get("/api/timer", (req, res) => res.json(timerState()));
+app.post("/api/timer", requireAdmin, (req, res) => {
+  const { minutes, label } = req.body || {};
+  setTimer(minutes, label);
+  res.json(timerState());
+});
+app.delete("/api/timer", requireAdmin, (req, res) => {
+  clearTimer();
+  res.json(timerState());
+});
+app.post("/api/admin/reload-gifs", requireAdmin, async (req, res) => {
+  await refreshGifs(SIZE);
+  res.json({ ok: true, count: gifs.assets.size, rejected: gifs.rejected });
+});
 
 app.get("/api/message", (req, res) => {
   res.json(messageActive() ? { active: true, ...message } : { active: false });

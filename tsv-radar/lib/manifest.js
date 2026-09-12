@@ -11,6 +11,12 @@ import { content, safeName } from "./content.js";
 import { renderTextCard, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
 import { sites as planeSites, ensureSite } from "./planes.js";
 import { dateFrames } from "./date.js";
+import { mondrianFrames, MONDRIAN_FRAME_MS } from "./mondrian.js";
+import { moonFrames } from "./moon.js";
+import { sunFrames } from "./sun.js";
+import { countdownFrames } from "./countdown.js";
+import { timer, timerActive } from "./timer.js";
+import { gifs, pickGif } from "./gifs.js";
 
 const MANIFEST_PATH = process.env.MANIFEST_PATH || "/mnt/data/manifest.json";
 
@@ -31,6 +37,10 @@ export const DEFAULT_MANIFEST = {
     { type: "CLOCK", durationMs: 10000 },
     { type: "DATE", durationMs: 6000 },
     { type: "PLANES", durationMs: 9000 },
+    { type: "MONDRIAN", durationMs: 8000 },
+    { type: "MOON", durationMs: 7000 },
+    { type: "SUN", durationMs: 7000 },
+    { type: "GIF", loops: 2 },
     { type: "QUOTE", durationMs: 7000 },
   ],
   devices: {},
@@ -122,6 +132,7 @@ export function writeRawManifest(text) {
 }
 
 // ── bitmap registry ──────────────────────────────────────────────
+const countdownPages = new Map(); // name -> page config, registered during resolve
 const textCache = new Map(); // key -> { frames, at }
 
 function renderCached(key, fn) {
@@ -139,6 +150,30 @@ export function getBitmap(name, size = 64, deviceId = "default") {
 
   if (n === "radar") {
     return { name: n, frames: radar.frames.map((f) => f.buf), frameDelayMs: 450, updatedAt: radar.updatedAt };
+  }
+  if (n === "mondrian") {
+    return { name: n, frames: mondrianFrames(size), frameDelayMs: MONDRIAN_FRAME_MS, updatedAt: Date.now() };
+  }
+  if (n === "moon") {
+    return { name: n, frames: moonFrames(size), frameDelayMs: 8000, updatedAt: Date.now() };
+  }
+  if (n === "sun") {
+    return { name: n, frames: sunFrames(size), frameDelayMs: 8000, updatedAt: Date.now() };
+  }
+  if (n === "gif") {
+    const g = pickGif();
+    if (!g) return { name: n, frames: [], frameDelayMs: 0, updatedAt: 0 };
+    return { name: n, frames: g.frames, frameDelayMs: g.frameDelayMs, updatedAt: gifs.updatedAt, text: g.file };
+  }
+  if (n.startsWith("gif-")) {
+    const g = gifs.assets.get(n);
+    if (!g) return null;
+    return { name: n, frames: g.frames, frameDelayMs: g.frameDelayMs, updatedAt: gifs.updatedAt, text: g.file };
+  }
+  if (n.startsWith("countdown-")) {
+    const page = countdownPages.get(n);
+    if (!page) return null;
+    return { name: n, frames: countdownFrames(page, size), frameDelayMs: 6000, updatedAt: Date.now() };
   }
   if (n === "date") {
     return { name: n, frames: dateFrames(size), frameDelayMs: 6000, updatedAt: Date.now() };
@@ -219,7 +254,34 @@ export function resolveManifest(deviceId = "default", size = 64) {
           continue;
         }
       }
-      pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450) });
+      pages.push({ type: "BITMAP", name: "radar", loops: posInt(p.loops, 5), frameDelayMs: posInt(p.frameDelayMs, 450), morph: p.morph !== false });
+      continue;
+    }
+    if (t === "MONDRIAN") {
+      const durationMs = posInt(p.durationMs, 8000);
+      pages.push({ type: "BITMAP", name: "mondrian", loops: 1, frameDelayMs: MONDRIAN_FRAME_MS, holdMs: Math.max(0, durationMs - 8 * MONDRIAN_FRAME_MS) });
+      continue;
+    }
+    if (t === "MOON") {
+      pages.push({ type: "BITMAP", name: "moon", loops: 1, frameDelayMs: posInt(p.durationMs, 8000) });
+      continue;
+    }
+    if (t === "SUN") {
+      if (!weather.data?.days?.[0]?.sunrise) { skipped.push({ type: t, reason: "no sunrise data yet" }); continue; }
+      pages.push({ type: "BITMAP", name: "sun", loops: 1, frameDelayMs: posInt(p.durationMs, 8000) });
+      continue;
+    }
+    if (t === "GIF") {
+      if (!gifs.assets.size) { skipped.push({ type: t, reason: `no dark-background GIFs in ${gifs.dir}` }); continue; }
+      pages.push({ type: "BITMAP", name: "gif", loops: posInt(p.loops, 2), frameDelayMs: 0, morph: false });
+      continue;
+    }
+    if (t === "COUNTDOWN") {
+      const name = `countdown-${safeName(p.label || p.date || "event")}`;
+      countdownPages.set(name, p);
+      const frames = countdownFrames(p, size);
+      if (!frames.length) { skipped.push({ type: t, name, reason: "bad date or already past" }); continue; }
+      pages.push({ type: "BITMAP", name, loops: 1, frameDelayMs: posInt(p.durationMs, 6000) });
       continue;
     }
     if (t === "DATE") {
@@ -235,7 +297,7 @@ export function resolveManifest(deviceId = "default", size = 64) {
       // animated icon: cycle the phase frames for roughly durationMs
       const durationMs = posInt(p.durationMs, 8000);
       const loops = Math.max(1, Math.round(durationMs / (n * weather.frameDelayMs)));
-      pages.push({ type: "BITMAP", name: "weather", loops, frameDelayMs: weather.frameDelayMs });
+      pages.push({ type: "BITMAP", name: "weather", loops, frameDelayMs: weather.frameDelayMs, morph: p.morph !== false });
       continue;
     }
     if (t === "PLANES") {
@@ -265,6 +327,16 @@ export function resolveManifest(deviceId = "default", size = 64) {
       continue;
     }
     skipped.push({ type: t, reason: "unknown page type" });
+  }
+
+  // A running timer takes over the whole playlist; poll fast so it clears promptly.
+  if (timerActive()) {
+    const body = {
+      v: 2, deviceId, size, pollMs: 10000, tz: d.tz, bright: d.bright, ota: d.ota,
+      pages: [{ type: "TIMER", endsAt: Math.floor(timer.endsAt / 1000), label: timer.label }],
+    };
+    body.rev = crypto.createHash("sha1").update(JSON.stringify(body)).digest("hex").slice(0, 12);
+    return { manifest: body, skipped: [{ type: "ALL", reason: "timer running" }] };
   }
 
   // An active message is injected right after the first page of every cycle.
