@@ -209,8 +209,16 @@ static int digitWeight(int d) { return d == 1 ? 40 : 100; }
 
 static void layoutRow(const int *digits, int n, Cell *cells, int rx0, int rx1) {
   int total = 0;
-  for (int i = 0; i < n; i++) total += digitWeight(digits[i]);
+  bool allOnes = true;
+  for (int i = 0; i < n; i++) { total += digitWeight(digits[i]); if (digits[i] != 1) allOnes = false; }
   int width = rx1 - rx0, x = rx0;
+  if (allOnes) {
+    // "1" and "11" don't stretch across the row: each 1 keeps the width it has
+    // beside a wide digit and the group sits at the right
+    int w = (width * digitWeight(1)) / (digitWeight(1) + digitWeight(0));
+    for (int i = 0; i < n; i++) cells[i] = { 1, rx1 - (n - i) * w, w };
+    return;
+  }
   for (int i = 0; i < n; i++) {
     int w = (i == n - 1) ? (rx1 - x) : (width * digitWeight(digits[i])) / total;
     cells[i] = { digits[i], x, w };

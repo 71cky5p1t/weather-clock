@@ -17,6 +17,8 @@ export const GEOMETRY = {
                      //     the free-standing bar reads as a leading hour digit (04:10 looks like 14:10)
   stemGap: 3,        // px between an extended stem and the squeezed row
   minHole: 3,        // px of daylight a squeezed digit must keep between its stems, else no squeeze
+  packOnes: 1,       // 1 = a row made only of 1s (1, 11) doesn't stretch across the row: each 1 keeps
+                     //     the width it has beside a wide digit and the group sits at the right
 };
 
 export const PALETTE = {
@@ -77,6 +79,10 @@ export function layoutRow(digits, g, rx0, rx1) {
   const weights = digits.map((d) => (d === 1 ? g.weightNarrow : g.weightWide));
   const total = weights.reduce((a, b) => a + b, 0);
   const width = rx1 - rx0;
+  if (g.packOnes && digits.every((d) => d === 1)) {
+    const w = Math.floor((width * g.weightNarrow) / (g.weightNarrow + g.weightWide));
+    return digits.map((d, i) => ({ d, x: rx1 - (digits.length - i) * w, w }));
+  }
   let x = rx0;
   return digits.map((d, i) => {
     const w = i === digits.length - 1 ? rx1 - x : Math.floor((width * weights[i]) / total);
@@ -160,7 +166,7 @@ export function drawClock(cv, hh, mm, ss, size = 64, geometry = {}) {
 // Draw a row of digits with the clock's geometry (used by the date page).
 // colours: array of [r,g,b] per digit position.
 export function drawDigitsRow(cv, digits, y, h, size, colours, geometry = {}) {
-  const g = { ...GEOMETRY, ...geometry };
+  const g = { ...GEOMETRY, packOnes: 0, ...geometry };   // a date's "1" or "11" stays centred
   const cells = layoutRow(digits, g, 0, size);
   cells.forEach((c, i) => drawDigit(cv, c.d, c.x, y, c.w, h, colours[i % colours.length], colours[i % colours.length], y + h, g));
   return cells;
