@@ -145,7 +145,7 @@
     <h2>Quote <span class="right muted" id="quote-sub"></span></h2>
     <div class="row">
       <img id="quote" class="pix" width="128" height="128" alt="quote">
-      <div class="muted" style="max-width:220px">Quotes rotate on a timer. Edit the list under <code>defaults.quotes</code> in the playlist config.</div>
+      <div class="muted" style="max-width:220px">Quotes rotate on a timer and fade in a word at a time on the panel. Edit the list under <code>defaults.quotes</code> in the playlist config.</div>
     </div>
   </section>
 
@@ -303,7 +303,7 @@ function render() {
   $("#gif-note").textContent = (gf.rejected.length ? `Rejected for light backgrounds: ${gf.rejected.map((r) => `${r.file} (${Math.round(r.score * 100)}% dark)`).join(", ")}. ` : "") + (gf.lastError || "");
 
   // quote
-  $("#quote").src = `/api/bitmap/quote/0.png?scale=2&deviceId=${encodeURIComponent(deviceId())}${bust}`;
+  $("#quote").src = `/api/bitmap/quote/last.png?scale=2&deviceId=${encodeURIComponent(deviceId())}${bust}`;
   $("#quote-sub").textContent = s.quote;
 
   // playlist

@@ -88,7 +88,7 @@ The deployer and cloudflared containers themselves are not rebuilt by the hook. 
 - `MONDRIAN` – a fresh random composition per visit, blocks animating in.
 - `COUNTDOWN` – `label` (≤ 10 chars), `date` (YYYY-MM-DD), optional `yearly`; days remaining in the clock's digits.
 - `GIF` – a random GIF from `tsv-radar/content/gifs/` (`loops`). GIFs are scored on how dark their border is and light-background ones are rejected so nothing glares. Eight procedural palette GIFs ship in the repo (bounce, equaliser, Life, warp, pong, cube, block rain, wave). The server also pulls small pixel-art GIFs from Wikimedia Commons (free licences, no key; `COMMONS_GIFS=0` disables), and `GIPHY_API_KEY` adds Giphy searches. Everything fetched goes through the same dark-border filter.
-- `QUOTE` – rotates through `defaults.quotes`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension).
+- `QUOTE` – rotates through `defaults.quotes`; the words fade in one by one, then the quote holds for the rest of `durationMs`. `CONTENT` – any PNG/JPG/GIF/WebP dropped into `tsv-radar/content/` (name = filename without extension).
 - Messages sent from the dashboard are injected into the playlist for the chosen number of minutes. A **timer** started from the dashboard takes over the whole display (minutes over seconds in the clock's digits, red flash when done) until it clears.
 - Add `"enabled": false` to park a page. Per-device overrides go under `devices.<deviceId>`.
 - The server skips pages whose data isn't available yet (e.g. radar before the first BoM fetch) and the dashboard tells you why.

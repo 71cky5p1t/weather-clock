@@ -8,7 +8,7 @@ import crypto from "crypto";
 import { radar, radarEchoPx } from "./radar.js";
 import { weather } from "./weather.js";
 import { content, safeName } from "./content.js";
-import { renderTextCard, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
+import { renderTextCard, renderQuoteFrames, quoteTiming, pickQuote, message, messageActive, DEFAULT_QUOTES } from "./text.js";
 import { sites as planeSites, ensureSite } from "./planes.js";
 import { dateFrames } from "./date.js";
 import { mondrianFrames, MONDRIAN_FRAME_MS } from "./mondrian.js";
@@ -138,7 +138,8 @@ const textCache = new Map(); // key -> { frames, at }
 function renderCached(key, fn) {
   const hit = textCache.get(key);
   if (hit) return hit.frames;
-  const frames = [fn().toRgb565BE()];
+  const out = fn();
+  const frames = (Array.isArray(out) ? out : [out]).map((cv) => cv.toRgb565BE());
   if (textCache.size > 64) textCache.clear();
   textCache.set(key, { frames, at: Date.now() });
   return frames;
@@ -189,8 +190,8 @@ export function getBitmap(name, size = 64, deviceId = "default") {
   }
   if (n === "quote") {
     const q = pickQuote(d.quotes, d.quoteRotateMinutes * 60 * 1000);
-    const frames = renderCached(`quote:${size}:${q.text}`, () => renderTextCard(q.text, { size }));
-    return { name: n, frames, frameDelayMs: 7000, updatedAt: 0, text: q.text };
+    const frames = renderCached(`quote:${size}:${q.text}`, () => renderQuoteFrames(q.text, { size }));
+    return { name: n, frames, frameDelayMs: quoteTiming(q.text, { size }).stepMs, updatedAt: 0, text: q.text };
   }
   if (n === "message") {
     if (!messageActive()) return { name: n, frames: [], frameDelayMs: 0, updatedAt: 0 };
@@ -313,7 +314,11 @@ export function resolveManifest(deviceId = "default", size = 64) {
       continue;
     }
     if (t === "QUOTE") {
-      pages.push({ type: "BITMAP", name: "quote", loops: 1, frameDelayMs: posInt(p.durationMs, 7000) });
+      // words fade in one by one, then the finished quote holds for the rest of durationMs
+      const q = pickQuote(d.quotes, d.quoteRotateMinutes * 60 * 1000);
+      const qt = quoteTiming(q.text, { size });
+      const durationMs = posInt(p.durationMs, 7000);
+      pages.push({ type: "BITMAP", name: "quote", loops: 1, frameDelayMs: qt.stepMs, holdMs: Math.max(2500, durationMs - qt.frames * qt.stepMs) });
       continue;
     }
     if (t === "CONTENT") {

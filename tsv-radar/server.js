@@ -104,8 +104,8 @@ app.get("/api/bitmap/:name/:i.bin", (req, res) => {
 
 app.get("/api/bitmap/:name/:i.png", async (req, res) => {
   const bm = getBitmap(req.params.name, SIZE, safeName(req.query.deviceId || "default"));
-  const i = Number(req.params.i);
   if (!bm) return res.status(404).send("no such bitmap");
+  const i = req.params.i === "last" ? bm.frames.length - 1 : Number(req.params.i);
   if (!Number.isInteger(i) || i < 0 || i >= bm.frames.length) return res.status(404).send("bad index");
   const scale = Math.max(1, Math.min(8, Number(req.query.scale) || 1));
   res.set("Cache-Control", "no-store").type("png").send(await rgb565ToPng(bm.frames[i], SIZE, SIZE, scale));

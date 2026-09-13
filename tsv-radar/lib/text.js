@@ -19,12 +19,9 @@ function hashStr(s) {
 }
 
 // Pick the largest size that fits, then lay it out vertically centred.
-export function renderTextCard(text, { size = 64, accent, colour, header } = {}) {
-  const cv = new Canvas(size, size);
-  const pal = PALETTES[hashStr(text) % PALETTES.length];
-  const ac = accent || pal.accent;
-  const tc = colour || pal.text;
-
+// Returns the lines plus the x/y of every word so callers can light words
+// up individually.
+export function layoutTextCard(text, { size = 64, header } = {}) {
   const top = header ? 14 : 4;
   const bottom = size - 4;
   const avail = bottom - top;
@@ -47,19 +44,75 @@ export function renderTextCard(text, { size = 64, accent, colour, header } = {})
     chosen = { ...c, lines };
   }
 
+  const blockH = chosen.lines.length * chosen.lineH - 2;
+  let y = top + Math.floor((avail - blockH) / 2);
+  const words = [];
+  const spaceW = Canvas.measure(" ", chosen);
+  for (const line of chosen.lines) {
+    let x = Math.floor((size - Canvas.measure(line, chosen)) / 2);
+    for (const w of line.split(" ")) {
+      if (w) words.push({ text: w, x, y });
+      x += Canvas.measure(w, chosen) + spaceW;
+    }
+    y += chosen.lineH;
+  }
+  return { ...chosen, words };
+}
+
+function scaleColour([r, g, b], a) {
+  return [Math.round(r * a), Math.round(g * a), Math.round(b * a)];
+}
+
+// One card: the whole text, or the first `lit` words with the next `fading`
+// words at brightness `alpha`.
+function drawCard(text, { size = 64, accent, colour, header } = {}, layout, lit = Infinity, fading = 0, alpha = 1) {
+  const cv = new Canvas(size, size);
+  const pal = PALETTES[hashStr(text) % PALETTES.length];
+  const ac = accent || pal.accent;
+  const tc = colour || pal.text;
+
   // Messages get a header with a rule under it; quotes are just the words.
   if (header) {
     cv.textCentered(1, header.toUpperCase().slice(0, 10), C.grey);
     cv.hline(0, 10, size, ac);
   }
-
-  const blockH = chosen.lines.length * chosen.lineH - 2;
-  let y = top + Math.floor((avail - blockH) / 2);
-  for (const line of chosen.lines) {
-    cv.textCentered(y, line, tc, chosen);
-    y += chosen.lineH;
-  }
+  layout.words.forEach((w, i) => {
+    const c = i < lit ? tc : i < lit + fading ? scaleColour(tc, alpha) : null;
+    if (c) cv.text(w.x, w.y, w.text, c, layout);
+  });
   return cv;
+}
+
+export function renderTextCard(text, opts = {}) {
+  return drawCard(text, opts, layoutTextCard(text, opts));
+}
+
+// ── word-by-word fade for quotes ─────────────────────────────────
+// The board plays at most MAX_QUOTE_FRAMES frames per page, so short quotes
+// get a few brightness steps per word and long ones reveal a word (or a
+// couple) per frame.
+export const MAX_QUOTE_FRAMES = 24;   // firmware MAX_FRAMES_T
+const WORD_MS = 350;                  // time each word takes to arrive
+
+export function quoteTiming(text, { size = 64 } = {}) {
+  const words = layoutTextCard(text, { size }).words.length || 1;
+  const group = Math.ceil(words / MAX_QUOTE_FRAMES);          // words revealed together
+  const units = Math.ceil(words / group);
+  const steps = Math.max(1, Math.min(4, Math.floor(MAX_QUOTE_FRAMES / units)));
+  return { words, group, units, steps, frames: units * steps, stepMs: Math.max(60, Math.round((WORD_MS * group) / steps)) };
+}
+
+export function renderQuoteFrames(text, opts = {}) {
+  const layout = layoutTextCard(text, opts);
+  const t = quoteTiming(text, opts);
+  const frames = [];
+  for (let u = 0; u < t.units; u++) {
+    for (let s = 1; s <= t.steps; s++) {
+      const alpha = s / t.steps;
+      frames.push(alpha >= 1 ? drawCard(text, opts, layout, (u + 1) * t.group) : drawCard(text, opts, layout, u * t.group, t.group, alpha * alpha));
+    }
+  }
+  return frames;
 }
 
 // ── quotes ───────────────────────────────────────────────────────
